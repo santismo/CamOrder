@@ -1,6 +1,6 @@
 ## CamOrder Workflow (Quick Start)
 
-1) Open `CAMORDER PRO v1.html` in Chrome.
+1) Open `CAMORDER PRO v1.html` in Chrome. (relies on Chrome functions)
 2) Click **Choose Project Folder** and select your project folder.
 3) Enable MIDI + Camera, arm the recorder, and record your takes.
 4) Click **Export Resolve Package** (this writes:

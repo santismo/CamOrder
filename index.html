@@ -1,0 +1,1685 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CamOrder Recorder</title>
+  <style>
+    :root {
+      --bg-0: #0e1217;
+      --bg-1: #141a21;
+      --panel: #1b222b;
+      --panel-hi: #222c37;
+      --panel-edge: #2c3744;
+      --text: #e6ecf3;
+      --muted: #98a6b3;
+      --accent: #4ad38a;
+      --accent-2: #3aa2ff;
+      --danger: #ff4d4d;
+      --warning: #f2c94c;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Lucida Sans Unicode", "Tahoma", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 600px at 20% 10%, rgba(58, 162, 255, 0.12), transparent 60%),
+        radial-gradient(900px 500px at 85% 15%, rgba(74, 211, 138, 0.12), transparent 65%),
+        linear-gradient(160deg, var(--bg-0), var(--bg-1));
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #app {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    #topbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+      border: 1px solid var(--panel-edge);
+      border-radius: 12px;
+      box-shadow: 0 8px 20px var(--shadow);
+      min-height: 64px;
+    }
+
+    #brand {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    #brand h1 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 1px;
+    }
+
+    #brand span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    #statusRow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    #timeRow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    #timeDisplay {
+      font-family: "Lucida Console", "Courier New", monospace;
+      font-size: 13px;
+      background: #0f141a;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #26303b;
+    }
+
+    #bpmDisplay {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .pill {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: 0.4px;
+      background: rgba(152, 166, 179, 0.1);
+      color: var(--muted);
+      border: 1px solid rgba(152, 166, 179, 0.3);
+    }
+
+    .pill.live {
+      background: rgba(74, 211, 138, 0.2);
+      color: var(--accent);
+      border-color: rgba(74, 211, 138, 0.4);
+    }
+
+    .pill.recording {
+      background: rgba(255, 77, 77, 0.2);
+      color: var(--danger);
+      border-color: rgba(255, 77, 77, 0.4);
+    }
+
+    .pill.warn {
+      background: rgba(242, 201, 76, 0.2);
+      color: var(--warning);
+      border-color: rgba(242, 201, 76, 0.4);
+    }
+
+    #content {
+      display: grid;
+      grid-template-columns: 280px 1fr 320px;
+      gap: 10px;
+      min-height: 0;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, #1a222b, #182029);
+      border: 1px solid var(--panel-edge);
+      border-radius: 12px;
+      box-shadow: 0 8px 20px var(--shadow);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .panel-header {
+      padding: 10px 12px;
+      border-bottom: 1px solid #25303b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .panel-header h3 {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .panel-body {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field label {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button, select, input[type="text"], input[type="number"] {
+      background: var(--panel-hi);
+      color: var(--text);
+      border: 1px solid var(--panel-edge);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      outline: none;
+    }
+
+    #convertCmd {
+      flex: 1;
+      font-family: "Lucida Console", "Courier New", monospace;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    button {
+      cursor: pointer;
+      transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease;
+    }
+
+    button:hover {
+      background: #2a3541;
+      border-color: #3a4756;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    button.primary {
+      background: var(--accent-2);
+      border-color: rgba(58, 162, 255, 0.6);
+      color: #081b2d;
+      font-weight: 700;
+    }
+
+    button.danger {
+      background: var(--danger);
+      border-color: #ff7a7a;
+      color: #2b0b0b;
+      font-weight: 700;
+    }
+
+    button.ghost {
+      background: transparent;
+      border: 1px dashed var(--panel-edge);
+      color: var(--muted);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    #monitorFrame {
+      position: relative;
+      margin: 10px;
+      border-radius: 12px;
+      background: #06080b;
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #liveVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: none;
+    }
+
+    #monitorPlaceholder {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    #takesList {
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+      overflow: auto;
+      flex: 1;
+    }
+
+    .take-item {
+      background: #121820;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .take-title {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .take-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .take-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    #exportNotes {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+      background: #10161d;
+      border-radius: 6px;
+      padding: 8px;
+      border: 1px dashed #2a3541;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 1100px) {
+      #content {
+        grid-template-columns: 1fr;
+      }
+
+      #topbar {
+        grid-template-columns: 1fr;
+        justify-items: start;
+      }
+
+      #timeRow,
+      #statusRow {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div id="brand">
+        <h1>CamOrder Recorder</h1>
+        <span>MIDI clock synced video capture for DAWs</span>
+      </div>
+      <div id="statusRow">
+        <span id="midiStatus" class="pill">MIDI Off</span>
+        <span id="recordStatus" class="pill">Idle</span>
+        <span id="cameraStatus" class="pill">Camera Off</span>
+      </div>
+      <div id="timeRow">
+        <span id="timeDisplay">00:00:00:00</span>
+        <span id="bpmDisplay">120.0 BPM</span>
+      </div>
+    </header>
+
+    <section id="content">
+      <aside id="controls" class="panel">
+        <div class="panel-header"><h3>Sync</h3></div>
+        <div class="panel-body">
+          <div class="field">
+            <label>MIDI Input (Clock)</label>
+            <select id="midiInputSelect"></select>
+          </div>
+          <div class="row">
+            <button id="midiConnectBtn" class="ghost">Enable MIDI</button>
+            <button id="armBtn" class="danger">Arm Recorder</button>
+          </div>
+          <div class="row">
+            <label>FPS
+              <select id="fpsSelect">
+                <option value="24">24</option>
+                <option value="25">25</option>
+                <option value="30" selected>30</option>
+                <option value="60">60</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="panel-header"><h3>Camera</h3></div>
+        <div class="panel-body">
+          <div class="field">
+            <label>Source</label>
+            <select id="cameraSelect"></select>
+          </div>
+          <div class="field">
+            <label>Resolution</label>
+            <select id="resolutionSelect"></select>
+          </div>
+          <div class="row">
+            <button id="enableCameraBtn" class="ghost">Enable Camera</button>
+            <button id="refreshDevices" class="ghost">Refresh</button>
+          </div>
+        </div>
+
+        <div class="panel-header"><h3>Project</h3></div>
+        <div class="panel-body">
+          <div class="field">
+            <label>Media Base Path (required for export)</label>
+            <input id="mediaBasePath" type="text" placeholder="file:///Users/name/Project/media" />
+          </div>
+          <div class="field">
+            <label>Convert Command</label>
+            <div class="row">
+              <input id="convertCmd" type="text" readonly value="Add Media Base Path to generate command." />
+              <button id="copyConvertCmd" class="ghost">Copy</button>
+            </div>
+          </div>
+          <div class="row">
+            <button id="chooseFolderBtn" class="ghost">Choose Project Folder</button>
+            <button id="downloadClipsBtn" class="ghost">Download Clips</button>
+          </div>
+          <div class="row">
+            <button id="exportPackageBtn" class="primary">Export Resolve Package</button>
+          </div>
+          <div id="exportNotes"></div>
+        </div>
+      </aside>
+
+      <section id="monitor" class="panel">
+        <div class="panel-header"><h3>Live Preview</h3></div>
+        <div id="monitorFrame">
+          <video id="liveVideo" muted playsinline autoplay></video>
+          <div id="monitorPlaceholder">Enable camera to preview the feed.</div>
+        </div>
+      </section>
+
+      <aside id="takes" class="panel">
+        <div class="panel-header">
+          <h3>Takes</h3>
+          <button id="clearTakesBtn" class="ghost">Clear</button>
+        </div>
+        <div id="takesList"></div>
+      </aside>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const pad = (num, size = 2) => String(num).padStart(size, '0');
+
+      function secondsToSMPTE(seconds, fps) {
+        const safe = Math.max(0, seconds || 0);
+        const totalFrames = Math.floor(safe * fps + 1e-6);
+        const frames = totalFrames % fps;
+        const totalSeconds = Math.floor(totalFrames / fps);
+        const secs = totalSeconds % 60;
+        const mins = Math.floor(totalSeconds / 60) % 60;
+        const hours = Math.floor(totalSeconds / 3600);
+        return `${pad(hours)}:${pad(mins)}:${pad(secs)}:${pad(frames)}`;
+      }
+
+      function secondsToFcpDuration(seconds, fps) {
+        const frames = Math.max(0, Math.round(seconds * fps));
+        if (frames === 0) return '0s';
+        return `${frames}/${fps}s`;
+      }
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function snapSeconds(seconds, fps) {
+        const frame = 1 / fps;
+        return Math.round(seconds / frame) * frame;
+      }
+
+      const state = {
+        settings: {
+          fps: 30,
+        },
+        export: {
+          mediaBasePath: '',
+        },
+        midi: {
+          access: null,
+          input: null,
+          connected: false,
+          clock: {
+            lastTick: 0,
+            bpm: 120,
+            playing: false,
+            songPositionSeconds: 0,
+          },
+        },
+        camera: {
+          stream: null,
+          source: null,
+          status: 'off',
+        },
+        recording: {
+          active: false,
+          pending: false,
+          clipId: null,
+          startPlayhead: 0,
+          recorder: null,
+          chunks: [],
+        },
+        clips: [],
+        placements: [],
+        mediaCache: new Map(),
+        playheadSeconds: 0,
+        armed: true,
+        projectHandle: null,
+        dirty: false,
+      };
+
+      const dom = {};
+
+      function cacheDom() {
+        dom.midiStatus = document.getElementById('midiStatus');
+        dom.recordStatus = document.getElementById('recordStatus');
+        dom.cameraStatus = document.getElementById('cameraStatus');
+        dom.timeDisplay = document.getElementById('timeDisplay');
+        dom.bpmDisplay = document.getElementById('bpmDisplay');
+        dom.midiInputSelect = document.getElementById('midiInputSelect');
+        dom.midiConnectBtn = document.getElementById('midiConnectBtn');
+        dom.armBtn = document.getElementById('armBtn');
+        dom.fpsSelect = document.getElementById('fpsSelect');
+        dom.cameraSelect = document.getElementById('cameraSelect');
+        dom.resolutionSelect = document.getElementById('resolutionSelect');
+        dom.enableCameraBtn = document.getElementById('enableCameraBtn');
+        dom.refreshDevices = document.getElementById('refreshDevices');
+        dom.chooseFolderBtn = document.getElementById('chooseFolderBtn');
+        dom.downloadClipsBtn = document.getElementById('downloadClipsBtn');
+        dom.exportPackageBtn = document.getElementById('exportPackageBtn');
+        dom.exportNotes = document.getElementById('exportNotes');
+        dom.mediaBasePath = document.getElementById('mediaBasePath');
+        dom.convertCmd = document.getElementById('convertCmd');
+        dom.copyConvertCmd = document.getElementById('copyConvertCmd');
+        dom.liveVideo = document.getElementById('liveVideo');
+        dom.monitorPlaceholder = document.getElementById('monitorPlaceholder');
+        dom.takesList = document.getElementById('takesList');
+        dom.clearTakesBtn = document.getElementById('clearTakesBtn');
+      }
+
+      function markDirty() {
+        state.dirty = true;
+      }
+
+      function makeId(prefix) {
+        return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+      }
+
+      function setPlayhead(seconds) {
+        const snapped = Math.max(0, snapSeconds(seconds, state.settings.fps));
+        state.playheadSeconds = snapped;
+        dom.timeDisplay.textContent = secondsToSMPTE(snapped, state.settings.fps);
+      }
+
+      function setMidiStatus(status, label = '') {
+        let text = label || 'MIDI Off';
+        let cls = 'pill';
+        if (status === 'ready') {
+          text = label || 'MIDI Ready';
+          cls = 'pill live';
+        } else if (status === 'connected') {
+          text = label || 'MIDI Connected';
+          cls = 'pill live';
+        } else if (status === 'warn') {
+          text = label || 'MIDI Warning';
+          cls = 'pill warn';
+        }
+        dom.midiStatus.textContent = text;
+        dom.midiStatus.className = cls;
+      }
+
+      function setRecordStatus(status) {
+        if (status === 'recording') {
+          dom.recordStatus.textContent = 'Recording';
+          dom.recordStatus.className = 'pill recording';
+        } else if (status === 'armed') {
+          dom.recordStatus.textContent = 'Armed';
+          dom.recordStatus.className = 'pill live';
+        } else {
+          dom.recordStatus.textContent = 'Idle';
+          dom.recordStatus.className = 'pill';
+        }
+      }
+
+      function setCameraStatus(status) {
+        state.camera.status = status;
+        if (status === 'ready') {
+          dom.cameraStatus.textContent = 'Camera Ready';
+          dom.cameraStatus.className = 'pill live';
+        } else if (status === 'blocked') {
+          dom.cameraStatus.textContent = 'Camera Blocked';
+          dom.cameraStatus.className = 'pill warn';
+        } else if (status === 'busy') {
+          dom.cameraStatus.textContent = 'Camera Busy';
+          dom.cameraStatus.className = 'pill warn';
+        } else if (status === 'live') {
+          dom.cameraStatus.textContent = 'Camera Live';
+          dom.cameraStatus.className = 'pill recording';
+        } else {
+          dom.cameraStatus.textContent = 'Camera Off';
+          dom.cameraStatus.className = 'pill';
+        }
+      }
+
+      function updateExportNotes() {
+        const lines = [];
+        lines.push('Stacked FCPXML keeps overlapping clips on separate tracks.');
+        lines.push('Use Media Base Path to auto-link in Resolve (absolute file paths).');
+        lines.push('If Resolve cannot find media: add the project folder to Media Storage and re-import the FCPXML.');
+        lines.push('Run convert-to-mov, then import camorder-stacked-mov.fcpxml.');
+        dom.exportNotes.textContent = lines.join('\n');
+      }
+
+      function getConvertCommand() {
+        if (!state.export.mediaBasePath) return '';
+        let base = state.export.mediaBasePath;
+        base = base.replace(/^file:\/\/localhost/, 'file://');
+        base = base.replace(/^file:\/\//, '');
+        base = decodeURIComponent(base);
+        base = base.replace(/\/+$/, '');
+        if (base.toLowerCase().endsWith('/media')) {
+          base = base.slice(0, -'/media'.length);
+        }
+        if (!base) return '';
+        const safePath = base.replace(/"/g, '\\"');
+        return `cd "${safePath}" && sh convert-to-mov.sh`;
+      }
+
+      function updateConvertCommand() {
+        if (!dom.convertCmd) return;
+        const cmd = getConvertCommand();
+        dom.convertCmd.value = cmd || 'Add Media Base Path to generate command.';
+      }
+
+      function updateBpmDisplay() {
+        dom.bpmDisplay.textContent = `${state.midi.clock.bpm.toFixed(1)} BPM`;
+      }
+
+      function populateResolutionOptions() {
+        const presets = [
+          { label: '640x480', width: 640, height: 480 },
+          { label: '1280x720', width: 1280, height: 720 },
+          { label: '1920x1080', width: 1920, height: 1080 },
+          { label: '2560x1440', width: 2560, height: 1440 },
+        ];
+        dom.resolutionSelect.innerHTML = '';
+        presets.forEach((preset) => {
+          const option = document.createElement('option');
+          option.value = `${preset.width}x${preset.height}`;
+          option.textContent = preset.label;
+          dom.resolutionSelect.appendChild(option);
+        });
+        dom.resolutionSelect.value = '1280x720';
+      }
+
+      function updateCameraSourceUI() {
+        const isScreen = dom.cameraSelect.value === 'screen';
+        dom.resolutionSelect.disabled = isScreen;
+      }
+
+      function clearCameraStream(stopTracks = true) {
+        if (state.camera.stream && stopTracks) {
+          state.camera.stream.getTracks().forEach((track) => track.stop());
+        }
+        state.camera.stream = null;
+        state.camera.source = null;
+        dom.liveVideo.srcObject = null;
+        dom.liveVideo.style.display = 'none';
+        dom.monitorPlaceholder.style.display = 'block';
+      }
+
+      async function getCameraStream() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert('Camera capture is not supported in this browser.');
+          setCameraStatus('blocked');
+          return null;
+        }
+        try {
+          const source = dom.cameraSelect.value;
+          if (state.camera.stream && state.camera.source === source && state.camera.stream.active) {
+            dom.liveVideo.srcObject = state.camera.stream;
+            dom.liveVideo.style.display = 'block';
+            dom.monitorPlaceholder.style.display = 'none';
+            dom.liveVideo.play().catch(() => {});
+            setCameraStatus('ready');
+            return state.camera.stream;
+          }
+          if (state.camera.stream) clearCameraStream(true);
+          setCameraStatus('busy');
+          let stream;
+          if (source === 'screen') {
+            if (!navigator.mediaDevices.getDisplayMedia) {
+              alert('Screen capture is not supported in this browser.');
+              setCameraStatus('blocked');
+              return null;
+            }
+            stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+          } else {
+            const [width, height] = dom.resolutionSelect.value.split('x').map(Number);
+            const deviceId = source || undefined;
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: deviceId ? { exact: deviceId } : undefined,
+                width: { ideal: width },
+                height: { ideal: height },
+              },
+              audio: false,
+            });
+          }
+          state.camera.stream = stream;
+          state.camera.source = source;
+          stream.getTracks().forEach((track) => {
+            track.onended = () => {
+              if (state.camera.stream === stream) {
+                clearCameraStream(false);
+                setCameraStatus('off');
+              }
+            };
+          });
+          dom.liveVideo.srcObject = stream;
+          dom.liveVideo.style.display = 'block';
+          dom.monitorPlaceholder.style.display = 'none';
+          dom.liveVideo.play().catch(() => {});
+          setCameraStatus('ready');
+          return stream;
+        } catch (error) {
+          alert(`Unable to access camera: ${error.message}`);
+          setCameraStatus('blocked');
+          return null;
+        }
+      }
+
+      async function warmUpCamera(allowScreen = false) {
+        if (dom.cameraSelect.value === 'screen' && !allowScreen) {
+          setCameraStatus('off');
+          return;
+        }
+        if (state.camera.stream && state.camera.stream.active) {
+          setCameraStatus('ready');
+          return;
+        }
+        await getCameraStream();
+      }
+
+      function refreshDevices() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+          dom.cameraSelect.innerHTML = '<option value="">No devices</option>';
+          return;
+        }
+        navigator.mediaDevices.enumerateDevices().then((devices) => {
+          const cameras = devices.filter((device) => device.kind === 'videoinput');
+          dom.cameraSelect.innerHTML = '';
+          const screenOption = document.createElement('option');
+          screenOption.value = 'screen';
+          screenOption.textContent = 'Screen / Window Capture';
+          dom.cameraSelect.appendChild(screenOption);
+          cameras.forEach((camera) => {
+            const option = document.createElement('option');
+            option.value = camera.deviceId;
+            option.textContent = camera.label || `Camera ${dom.cameraSelect.length}`;
+            dom.cameraSelect.appendChild(option);
+          });
+          if (!cameras.length) dom.cameraSelect.value = 'screen';
+          updateCameraSourceUI();
+        }).catch(() => {
+          dom.cameraSelect.innerHTML = '<option value="">Camera list blocked</option>';
+        });
+      }
+
+      function getSupportedMimeType() {
+        const types = [
+          'video/webm;codecs=vp9',
+          'video/webm;codecs=vp8',
+          'video/webm',
+        ];
+        for (const type of types) {
+          if (MediaRecorder.isTypeSupported(type)) return type;
+        }
+        return '';
+      }
+
+      async function ensurePermission(handle) {
+        if (!handle) return false;
+        if (await handle.queryPermission({ mode: 'readwrite' }) === 'granted') return true;
+        return (await handle.requestPermission({ mode: 'readwrite' })) === 'granted';
+      }
+
+      async function chooseProjectFolder() {
+        if (!window.showDirectoryPicker) {
+          alert('File System Access API not available.');
+          return;
+        }
+        state.projectHandle = await window.showDirectoryPicker();
+        const ok = await ensurePermission(state.projectHandle);
+        if (!ok) alert('Write permission denied for the selected folder.');
+        if (ok && !state.export.mediaBasePath) {
+          const suggested = window.localStorage.getItem('camorderMediaBasePath') || '';
+          const input = window.prompt('Optional: paste full media folder path for Resolve auto-link (file:///.../media)', suggested);
+          if (input) {
+            let base = normalizeMediaBaseInput(input);
+            if (base && !/\/media$/i.test(base)) {
+              base = `${base}/media`;
+            }
+            state.export.mediaBasePath = base;
+            dom.mediaBasePath.value = base;
+            window.localStorage.setItem('camorderMediaBasePath', base);
+            updateConvertCommand();
+          }
+        }
+      }
+
+      async function saveRecordedClipToProject(clip, blob) {
+        if (!state.projectHandle) return;
+        const ok = await ensurePermission(state.projectHandle);
+        if (!ok) return;
+        const mediaDir = await state.projectHandle.getDirectoryHandle('media', { create: true });
+        const filename = clip.filename || `${clip.id}.webm`;
+        clip.filename = filename;
+        const handle = await mediaDir.getFileHandle(filename, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      }
+
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function downloadRecordedClips() {
+        for (const clip of state.clips) {
+          const media = state.mediaCache.get(clip.id);
+          if (media && media.blob) {
+            downloadBlob(media.blob, clip.filename || `${clip.id}.webm`);
+          }
+        }
+      }
+
+      function sanitizeReelName(name) {
+        const base = (name || 'REEL').replace(/\.[^/.]+$/, '');
+        const clean = base.replace(/[^a-z0-9]/gi, '_').toUpperCase();
+        return clean.slice(0, 8) || 'REEL001';
+      }
+
+      function resolveClipFilename(clip, preferMov = false) {
+        const raw = clip?.filename || clip?.name || clip?.id || 'clip';
+        if (!preferMov) return raw;
+        if (clip && clip.source !== 'recorded') return raw;
+        const base = raw.replace(/\.[^/.]+$/, '');
+        return `${base}.mov`;
+      }
+
+      function sanitizeBasePath(path) {
+        if (!path) return '';
+        let value = path.trim();
+        value = value.replace(/^['"]+|['"]+$/g, '');
+        if (!value) return '';
+        value = value.replace(/\\/g, '/');
+        return value.replace(/\/+$/, '');
+      }
+
+      function normalizeMediaBaseInput(value) {
+        const cleaned = sanitizeBasePath(value);
+        if (!cleaned) return '';
+        if (cleaned.startsWith('file://')) return cleaned;
+        if (cleaned.startsWith('/')) return `file://${cleaned}`;
+        return cleaned;
+      }
+
+      function makeFileUrl(path, filename) {
+        const base = sanitizeBasePath(path);
+        if (!base) return `media/${filename}`;
+        let normalized = base;
+        let prefix = 'file://';
+        if (normalized.startsWith('file://')) {
+          normalized = normalized.slice('file://'.length);
+          if (normalized.startsWith('localhost/')) {
+            normalized = normalized.slice('localhost/'.length);
+            prefix = 'file://localhost';
+          }
+        }
+        normalized = normalized.replace(/^\/+/, '/');
+        const combined = `${normalized}/${filename}`;
+        const encoded = combined.split('/').map(encodeURIComponent).join('/');
+        return `${prefix}${encoded}`;
+      }
+
+      function getShellExportHint() {
+        if (!state.export.mediaBasePath) return '';
+        let base = state.export.mediaBasePath;
+        base = base.replace(/^file:\/\/localhost/, 'file://');
+        base = base.replace(/^file:\/\//, '');
+        base = decodeURIComponent(base);
+        base = base.replace(/\/+$/, '');
+        if (base.toLowerCase().endsWith('/media')) {
+          base = base.slice(0, -'/media'.length);
+        }
+        if (!base) return '';
+        const safePath = base.replace(/"/g, '\\"');
+        return `cd "${safePath}"\nsh convert-to-mov.sh`;
+      }
+
+      function sanitizeBasePath(path) {
+        if (!path) return '';
+        let value = path.trim();
+        if (!value) return '';
+        value = value.replace(/\\/g, '/');
+        return value.replace(/\/+$/, '');
+      }
+
+      function makeFileUrl(path, filename) {
+        const base = sanitizeBasePath(path);
+        if (!base) return `media/${filename}`;
+        const combined = `${base}/${filename}`;
+        if (combined.startsWith('file://')) return combined;
+        const encoded = combined.split('/').map(encodeURIComponent).join('/');
+        return `file://${encoded}`;
+      }
+
+      function getPlacementsForExport() {
+        const fps = state.settings.fps;
+        const frame = 1 / fps;
+        const seen = new Set();
+        return state.placements
+          .map((placement) => ({
+            ...placement,
+            end: placement.timelineStartSeconds + placement.durationSeconds,
+          }))
+          .filter((placement) => placement.durationSeconds > frame)
+          .filter((placement) => {
+            const key = [
+              placement.clipId,
+              placement.timelineStartSeconds.toFixed(3),
+              placement.durationSeconds.toFixed(3),
+              placement.clipInSeconds.toFixed(3),
+            ].join('|');
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+      }
+
+      function buildStackedFcpXml(preferMp4 = true) {
+        const fps = state.settings.fps;
+        const placements = getPlacementsForExport().sort((a, b) => a.timelineStartSeconds - b.timelineStartSeconds);
+        const frame = 1 / fps;
+        const lanes = [];
+        const items = placements.map((placement) => {
+          const start = placement.timelineStartSeconds;
+          const end = placement.end;
+          let lane = 0;
+          for (; lane < lanes.length; lane += 1) {
+            if (start >= lanes[lane] - frame) break;
+          }
+          if (lane === lanes.length) lanes.push(end);
+          else lanes[lane] = Math.max(lanes[lane], end);
+          return { ...placement, lane };
+        });
+
+        const usedClipIds = new Set(items.map((item) => item.clipId));
+        const formatId = 'r1';
+        const formatWidth = 1920;
+        const formatHeight = 1080;
+        const frameDuration = `1/${fps}s`;
+        const totalDuration = secondsToFcpDuration(getTimelineDurationSeconds(), fps);
+
+        const assetLines = [];
+        Array.from(usedClipIds).forEach((clipId, index) => {
+          const clip = getClipById(clipId);
+          if (!clip) return;
+          const assetId = `r${index + 2}`;
+          const filename = resolveClipFilename(clip, preferMp4);
+          const src = makeFileUrl(state.export.mediaBasePath, filename);
+          const duration = secondsToFcpDuration(Math.max(clip.durationSeconds, 0), fps);
+          const safeName = (clip.name || clip.id).replace(/\"/g, '');
+          assetLines.push(
+            `    <asset id=\"${assetId}\" name=\"${safeName}\" src=\"${src}\" start=\"0s\" duration=\"${duration}\" hasVideo=\"1\" hasAudio=\"0\" format=\"${formatId}\"/>`
+          );
+          clip.__assetId = assetId;
+        });
+
+        const spineLines = [];
+        items.forEach((item) => {
+          const clip = getClipById(item.clipId);
+          if (!clip) return;
+          const assetId = clip.__assetId;
+          const clipName = (clip.name || clip.id).replace(/\"/g, '');
+          const clipIn = snapSeconds(item.clipInSeconds, fps);
+          const duration = snapSeconds(item.durationSeconds, fps);
+          const offset = secondsToFcpDuration(item.timelineStartSeconds, fps);
+          const start = secondsToFcpDuration(clipIn, fps);
+          const dur = secondsToFcpDuration(duration, fps);
+          const laneAttr = item.lane > 0 ? ` lane=\"${item.lane}\"` : '';
+          spineLines.push(
+            `          <asset-clip name=\"${clipName}\" ref=\"${assetId}\" offset=\"${offset}\" start=\"${start}\" duration=\"${dur}\"${laneAttr}/>`
+          );
+        });
+
+        const xml = [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<fcpxml version="1.9">',
+          '  <resources>',
+          `    <format id=\"${formatId}\" name=\"CamOrderFormat\" frameDuration=\"${frameDuration}\" width=\"${formatWidth}\" height=\"${formatHeight}\"/>`,
+          assetLines.join('\n'),
+          '  </resources>',
+          '  <library>',
+          '    <event name="CamOrder">',
+          '      <project name="CamOrder">',
+          `        <sequence format=\"${formatId}\" duration=\"${totalDuration}\" tcStart=\"0s\" tcFormat=\"NDF\">`,
+          '          <spine>',
+          spineLines.join('\n'),
+          '          </spine>',
+          '        </sequence>',
+          '      </project>',
+          '    </event>',
+          '  </library>',
+          '</fcpxml>',
+        ].filter((line) => line !== '').join('\n');
+
+        Array.from(usedClipIds).forEach((clipId) => {
+          const clip = getClipById(clipId);
+          if (clip && clip.__assetId) delete clip.__assetId;
+        });
+
+        return xml;
+      }
+
+      function buildFlatFcpXml(preferMp4 = true) {
+        const fps = state.settings.fps;
+        const segments = buildFlatSegments();
+        const usedClipIds = new Set();
+        segments.forEach((segment) => {
+          const placement = getPlacementById(segment.placementId);
+          if (placement) usedClipIds.add(placement.clipId);
+        });
+
+        const formatId = 'r1';
+        const formatWidth = 1920;
+        const formatHeight = 1080;
+        const frameDuration = `1/${fps}s`;
+        const totalDuration = secondsToFcpDuration(getTimelineDurationSeconds(), fps);
+
+        const assetLines = [];
+        Array.from(usedClipIds).forEach((clipId, index) => {
+          const clip = getClipById(clipId);
+          if (!clip) return;
+          const assetId = `r${index + 2}`;
+          const filename = resolveClipFilename(clip, preferMp4);
+          const src = makeFileUrl(state.export.mediaBasePath, filename);
+          const duration = secondsToFcpDuration(Math.max(clip.durationSeconds, 0), fps);
+          const safeName = (clip.name || clip.id).replace(/\"/g, '');
+          assetLines.push(
+            `    <asset id=\"${assetId}\" name=\"${safeName}\" src=\"${src}\" start=\"0s\" duration=\"${duration}\" hasVideo=\"1\" hasAudio=\"0\" format=\"${formatId}\"/>`
+          );
+          clip.__assetId = assetId;
+        });
+
+        const spineLines = [];
+        segments.forEach((segment) => {
+          const placement = getPlacementById(segment.placementId);
+          if (!placement) return;
+          const clip = getClipById(placement.clipId);
+          if (!clip) return;
+          const assetId = clip.__assetId;
+          const clipName = (clip.name || clip.id).replace(/\"/g, '');
+          const segStart = snapSeconds(segment.start, fps);
+          const segEnd = snapSeconds(segment.end, fps);
+          const clipIn = snapSeconds(placement.clipInSeconds + (segStart - placement.timelineStartSeconds), fps);
+          const clipOut = snapSeconds(clipIn + (segEnd - segStart), fps);
+          const offset = secondsToFcpDuration(segStart, fps);
+          const start = secondsToFcpDuration(clipIn, fps);
+          const duration = secondsToFcpDuration(clipOut - clipIn, fps);
+          spineLines.push(
+            `          <asset-clip name=\"${clipName}\" ref=\"${assetId}\" offset=\"${offset}\" start=\"${start}\" duration=\"${duration}\"/>`
+          );
+        });
+
+        const xml = [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<fcpxml version="1.9">',
+          '  <resources>',
+          `    <format id=\"${formatId}\" name=\"CamOrderFormat\" frameDuration=\"${frameDuration}\" width=\"${formatWidth}\" height=\"${formatHeight}\"/>`,
+          assetLines.join('\n'),
+          '  </resources>',
+          '  <library>',
+          '    <event name="CamOrder">',
+          '      <project name="CamOrder">',
+          `        <sequence format=\"${formatId}\" duration=\"${totalDuration}\" tcStart=\"0s\" tcFormat=\"NDF\">`,
+          '          <spine>',
+          spineLines.join('\n'),
+          '          </spine>',
+          '        </sequence>',
+          '      </project>',
+          '    </event>',
+          '  </library>',
+          '</fcpxml>',
+        ].filter((line) => line !== '').join('\n');
+
+        Array.from(usedClipIds).forEach((clipId) => {
+          const clip = getClipById(clipId);
+          if (clip && clip.__assetId) delete clip.__assetId;
+        });
+
+        return xml;
+      }
+
+      function buildFlatSegments() {
+        const placements = getPlacementsForExport();
+        const boundaries = new Set();
+        placements.forEach((placement) => {
+          boundaries.add(placement.timelineStartSeconds);
+          boundaries.add(placement.end);
+        });
+        const times = Array.from(boundaries).sort((a, b) => a - b);
+        const segments = [];
+
+        for (let i = 0; i < times.length - 1; i += 1) {
+          const start = times[i];
+          const end = times[i + 1];
+          if (end <= start) continue;
+          const mid = (start + end) / 2;
+          const active = placements.filter((placement) => mid >= placement.timelineStartSeconds && mid < placement.end);
+          if (!active.length) continue;
+          active.sort((a, b) => a.timelineStartSeconds - b.timelineStartSeconds);
+          const top = active[active.length - 1];
+          const last = segments[segments.length - 1];
+          if (last && last.placementId === top.id) {
+            last.end = end;
+          } else {
+            segments.push({ placementId: top.id, start, end });
+          }
+        }
+
+        return segments;
+      }
+
+      function buildFlatEdl(preferMp4 = true) {
+        const fps = state.settings.fps;
+        const segments = buildFlatSegments();
+        const lines = [];
+        lines.push('TITLE: CamOrder Flattened');
+        lines.push('FCM: NON-DROP FRAME');
+
+        segments.forEach((segment, index) => {
+          const placement = getPlacementById(segment.placementId);
+          if (!placement) return;
+          const clip = getClipById(placement.clipId);
+          const filename = resolveClipFilename(clip, preferMp4);
+          const reel = sanitizeReelName(filename);
+          const segStart = snapSeconds(segment.start, fps);
+          const segEnd = snapSeconds(segment.end, fps);
+          const clipIn = snapSeconds(placement.clipInSeconds + (segStart - placement.timelineStartSeconds), fps);
+          const clipOut = snapSeconds(clipIn + (segEnd - segStart), fps);
+          const recIn = secondsToSMPTE(segStart, fps);
+          const recOut = secondsToSMPTE(segEnd, fps);
+          const srcIn = secondsToSMPTE(clipIn, fps);
+          const srcOut = secondsToSMPTE(clipOut, fps);
+          const eventNum = pad(index + 1, 3);
+          lines.push(`${eventNum}  ${reel.padEnd(8)} V     C        ${srcIn} ${srcOut} ${recIn} ${recOut}`);
+          lines.push(`* FROM CLIP NAME: ${filename}`);
+        });
+
+        if (!segments.length) {
+          lines.push('* (No placements to export)');
+        }
+
+        return lines.join('\n');
+      }
+
+      function buildFfmpegScriptSh() {
+        return [
+          '#!/bin/sh',
+          'set -e',
+          'mkdir -p media',
+          'for f in media/*.webm; do',
+          '  [ -e "$f" ] || continue',
+          '  base=$(basename "$f" .webm)',
+          '  ffmpeg -y -i "$f" -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -an "media/${base}.mov"',
+          'done',
+        ].join('\n');
+      }
+
+      function buildFfmpegScriptBat() {
+        return [
+          '@echo off',
+          'for %%f in (media\\*.webm) do (',
+          '  ffmpeg -y -i "%%f" -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -an "media\\%%~nf.mov"',
+          ')',
+        ].join('\r\n');
+      }
+
+      async function writeProjectFile(filename, content, contentType = 'text/plain') {
+        if (!state.projectHandle) return false;
+        const ok = await ensurePermission(state.projectHandle);
+        if (!ok) return false;
+        const handle = await state.projectHandle.getFileHandle(filename, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(new Blob([content], { type: contentType }));
+        await writable.close();
+        return true;
+      }
+
+      async function removeExportArtifacts() {
+        if (!state.projectHandle || !state.projectHandle.removeEntry) return;
+        const ok = await ensurePermission(state.projectHandle);
+        if (!ok) return;
+        const files = [
+          'camorder-stacked-mov.fcpxml',
+          'convert-to-mov.sh',
+          'convert-to-mov.bat',
+        ];
+        for (const filename of files) {
+          try {
+            await state.projectHandle.removeEntry(filename);
+          } catch (error) {
+            if (error && error.name !== 'NotFoundError') {
+              console.warn('Failed to remove export file', filename, error);
+            }
+          }
+        }
+      }
+
+      async function exportResolvePackage() {
+        if (window.showDirectoryPicker && !state.projectHandle) {
+          await chooseProjectFolder();
+        }
+        if (!state.projectHandle && window.showDirectoryPicker) {
+          alert('Choose a project folder to export a Resolve package.');
+          return;
+        }
+        if (!state.export.mediaBasePath) {
+          alert('Media Base Path is required so Resolve can auto-link.');
+          dom.mediaBasePath.focus();
+          return;
+        }
+        if (state.projectHandle) {
+          await removeExportArtifacts();
+        }
+        const fcpxmlMov = buildStackedFcpXml(true);
+        const xmlMovName = 'camorder-stacked-mov.fcpxml';
+
+        if (state.projectHandle) {
+          await writeProjectFile(xmlMovName, fcpxmlMov, 'application/xml');
+          await writeProjectFile('convert-to-mov.sh', buildFfmpegScriptSh(), 'text/x-shellscript');
+          await writeProjectFile('convert-to-mov.bat', buildFfmpegScriptBat(), 'text/plain');
+        } else {
+          downloadBlob(new Blob([fcpxmlMov], { type: 'application/xml' }), xmlMovName);
+          downloadBlob(new Blob([buildFfmpegScriptSh()], { type: 'text/x-shellscript' }), 'convert-to-mov.sh');
+          downloadBlob(new Blob([buildFfmpegScriptBat()], { type: 'text/plain' }), 'convert-to-mov.bat');
+        }
+        const hint = getShellExportHint();
+        const message = hint
+          ? `Resolve package exported.\n\nRun this in Terminal:\n${hint}\n\nThen import camorder-stacked-mov.fcpxml and relink to /media.`
+          : 'Resolve package exported. Run convert-to-mov, then import camorder-stacked-mov.fcpxml and relink to /media.';
+        alert(message);
+      }
+
+      function getClipById(clipId) {
+        return state.clips.find((clip) => clip.id === clipId);
+      }
+
+      function getPlacementById(placementId) {
+        return state.placements.find((placement) => placement.id === placementId);
+      }
+
+      function getTimelineDurationSeconds() {
+        let maxEnd = 0;
+        for (const placement of state.placements) {
+          const end = placement.timelineStartSeconds + placement.durationSeconds;
+          if (end > maxEnd) maxEnd = end;
+        }
+        return Math.max(0, maxEnd);
+      }
+
+      async function startRecording() {
+        if (state.recording.active || state.recording.pending) return;
+        if (window.showDirectoryPicker && !state.projectHandle) {
+          await chooseProjectFolder();
+          if (!state.projectHandle) {
+            alert('Choose a project folder before recording so clips can be saved.');
+            return;
+          }
+        }
+        if (!state.armed) return;
+
+        state.recording.pending = true;
+        const stream = await getCameraStream();
+        if (!stream) {
+          state.recording.pending = false;
+          return;
+        }
+
+        const mimeType = getSupportedMimeType();
+        const extension = 'webm';
+        const clipId = makeId('clip');
+        const clipName = `Take ${pad(state.clips.length + 1, 3)} ${secondsToSMPTE(state.playheadSeconds, state.settings.fps)}`;
+        const clip = {
+          id: clipId,
+          name: clipName,
+          createdAt: new Date().toISOString(),
+          durationSeconds: 0,
+          source: 'recorded',
+          filename: `${clipId}.${extension}`,
+          startSeconds: state.playheadSeconds,
+        };
+        state.clips.push(clip);
+
+        const placement = {
+          id: makeId('plc'),
+          clipId,
+          timelineStartSeconds: state.playheadSeconds,
+          clipInSeconds: 0,
+          clipOutSeconds: 0,
+          durationSeconds: 0,
+        };
+        state.placements.push(placement);
+
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        const chunks = [];
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onstop = () => {
+          finalizeRecording({ clipId, chunks, mimeType, placementId: placement.id, stream });
+        };
+        recorder.start(200);
+
+        state.recording = {
+          active: true,
+          pending: false,
+          clipId,
+          startPlayhead: state.playheadSeconds,
+          recorder,
+          chunks,
+        };
+        setRecordStatus('recording');
+        setCameraStatus('live');
+      }
+
+      function updateRecordingDuration() {
+        if (!state.recording.active) return;
+        const duration = Math.max(0, state.playheadSeconds - state.recording.startPlayhead);
+        const placement = state.placements.find((item) => item.clipId === state.recording.clipId);
+        if (placement) {
+          placement.durationSeconds = duration;
+          placement.clipOutSeconds = placement.clipInSeconds + duration;
+        }
+      }
+
+      function finalizeRecording(recording) {
+        const clip = getClipById(recording.clipId);
+        if (!clip) return;
+        const blob = new Blob(recording.chunks, { type: recording.mimeType || 'video/webm' });
+        clip.durationSeconds = Math.max(0, state.playheadSeconds - clip.startSeconds);
+        const placement = state.placements.find((item) => item.clipId === clip.id);
+        if (placement) {
+          placement.durationSeconds = clip.durationSeconds;
+          placement.clipOutSeconds = placement.clipInSeconds + clip.durationSeconds;
+        }
+        const url = URL.createObjectURL(blob);
+        state.mediaCache.set(clip.id, { blob, url, filename: clip.filename });
+        if (state.projectHandle) {
+          saveRecordedClipToProject(clip, blob).catch((error) => {
+            console.warn('Failed to save clip to project folder', error);
+          });
+        }
+        if (!state.camera.stream || recording.stream !== state.camera.stream) {
+          recording.stream.getTracks().forEach((track) => track.stop());
+        }
+        state.recording = { active: false, pending: false, clipId: null, startPlayhead: 0, recorder: null, chunks: [] };
+        setRecordStatus(state.armed ? 'armed' : 'idle');
+        setCameraStatus(state.camera.stream && state.camera.stream.active ? 'ready' : 'off');
+        markDirty();
+        renderTakes();
+      }
+
+      function stopRecording() {
+        if (!state.recording.active) return;
+        const { recorder } = state.recording;
+        if (recorder && recorder.state !== 'inactive') {
+          recorder.stop();
+        }
+      }
+
+      function renderTakes() {
+        dom.takesList.innerHTML = '';
+        if (!state.clips.length) {
+          const empty = document.createElement('div');
+          empty.className = 'take-meta';
+          empty.textContent = 'No takes recorded yet.';
+          dom.takesList.appendChild(empty);
+          return;
+        }
+        const fragment = document.createDocumentFragment();
+        state.clips.forEach((clip) => {
+          const placement = state.placements.find((item) => item.clipId === clip.id);
+          const item = document.createElement('div');
+          item.className = 'take-item';
+          const title = document.createElement('div');
+          title.className = 'take-title';
+          title.textContent = clip.name;
+          const meta = document.createElement('div');
+          meta.className = 'take-meta';
+          const startTc = secondsToSMPTE(clip.startSeconds || 0, state.settings.fps);
+          const dur = placement ? placement.durationSeconds : clip.durationSeconds;
+          meta.textContent = `Start ${startTc} | ${dur.toFixed(2)}s | ${clip.filename}`;
+          const actions = document.createElement('div');
+          actions.className = 'take-actions';
+          const dlBtn = document.createElement('button');
+          dlBtn.className = 'ghost';
+          dlBtn.textContent = 'Download';
+          dlBtn.addEventListener('click', () => {
+            const media = state.mediaCache.get(clip.id);
+            if (media && media.blob) {
+              downloadBlob(media.blob, clip.filename || `${clip.id}.webm`);
+            }
+          });
+          actions.appendChild(dlBtn);
+          item.appendChild(title);
+          item.appendChild(meta);
+          item.appendChild(actions);
+          fragment.appendChild(item);
+        });
+        dom.takesList.appendChild(fragment);
+      }
+
+      function clearTakes() {
+        if (!state.clips.length) return;
+        const ok = window.confirm('Clear all takes? This does not delete saved files.');
+        if (!ok) return;
+        state.clips = [];
+        state.placements = [];
+        state.mediaCache.clear();
+        renderTakes();
+      }
+
+      function pickPreferredMidiInput(inputs) {
+        if (!inputs.length) return '';
+        const priority = [/logic/i, /iac/i, /virtual/i, /bus/i];
+        for (const pattern of priority) {
+          const match = inputs.find((input) => pattern.test(input.name || ''));
+          if (match) return match.id;
+        }
+        return inputs[0].id;
+      }
+
+      function refreshMidiInputs() {
+        if (!state.midi.access) return;
+        const inputs = Array.from(state.midi.access.inputs.values());
+        const currentSelection = dom.midiInputSelect.value;
+        dom.midiInputSelect.innerHTML = '';
+        if (!inputs.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No MIDI inputs';
+          dom.midiInputSelect.appendChild(opt);
+          return;
+        }
+        inputs.forEach((input) => {
+          const opt = document.createElement('option');
+          opt.value = input.id;
+          opt.textContent = input.name || input.id;
+          dom.midiInputSelect.appendChild(opt);
+        });
+        if (currentSelection && inputs.some((input) => input.id === currentSelection)) {
+          dom.midiInputSelect.value = currentSelection;
+        } else {
+          dom.midiInputSelect.value = pickPreferredMidiInput(inputs);
+        }
+      }
+
+      async function requestMidiAccess() {
+        if (!navigator.requestMIDIAccess) {
+          setMidiStatus('warn', 'MIDI Unsupported');
+          return null;
+        }
+        try {
+          const access = await navigator.requestMIDIAccess();
+          return access;
+        } catch (error) {
+          console.warn('MIDI access error', error);
+          setMidiStatus('warn', 'MIDI Blocked');
+          return null;
+        }
+      }
+
+      function disconnectMidi() {
+        if (state.midi.input) {
+          state.midi.input.onmidimessage = null;
+        }
+        state.midi.input = null;
+        state.midi.connected = false;
+        state.midi.clock.playing = false;
+        dom.midiConnectBtn.textContent = 'Enable MIDI';
+        setMidiStatus('ready', 'MIDI Ready');
+        setRecordStatus(state.armed ? 'armed' : 'idle');
+      }
+
+      async function connectMidi() {
+        if (state.midi.connected) {
+          disconnectMidi();
+          return;
+        }
+        if (!state.midi.access) {
+          state.midi.access = await requestMidiAccess();
+          if (!state.midi.access) return;
+          state.midi.access.onstatechange = refreshMidiInputs;
+        }
+        refreshMidiInputs();
+        const inputId = dom.midiInputSelect.value;
+        const input = Array.from(state.midi.access.inputs.values()).find((item) => item.id === inputId);
+        if (!input) {
+          setMidiStatus('warn', 'No MIDI Input');
+          return;
+        }
+        state.midi.input = input;
+        state.midi.input.onmidimessage = handleMidiMessage;
+        state.midi.connected = true;
+        state.midi.clock.lastTick = 0;
+        state.midi.clock.playing = false;
+        dom.midiConnectBtn.textContent = 'Disable MIDI';
+        setMidiStatus('connected', input.name || 'MIDI Connected');
+        setRecordStatus(state.armed ? 'armed' : 'idle');
+      }
+
+      function handleSongPositionPointer(lsb, msb) {
+        const spp = (msb << 7) | lsb;
+        const bpm = Math.max(20, state.midi.clock.bpm || 120);
+        const seconds = (spp * 60) / (bpm * 4);
+        state.midi.clock.songPositionSeconds = seconds;
+        setPlayhead(seconds);
+      }
+
+      function handleMidiClockTick(timeStamp) {
+        const lastTick = state.midi.clock.lastTick;
+        if (lastTick) {
+          const delta = Math.max(0.001, (timeStamp - lastTick) / 1000);
+          const bpm = 60 / (delta * 24);
+          if (Number.isFinite(bpm) && bpm >= 20 && bpm <= 300) {
+            state.midi.clock.bpm = state.midi.clock.bpm * 0.85 + bpm * 0.15;
+            updateBpmDisplay();
+          }
+        }
+        state.midi.clock.lastTick = timeStamp;
+        if (!state.midi.clock.playing) return;
+        const tickSeconds = 60 / (state.midi.clock.bpm * 24);
+        setPlayhead(state.playheadSeconds + tickSeconds);
+        updateRecordingDuration();
+        if (state.armed && state.camera.stream && state.camera.stream.active) {
+          if (!state.recording.active && !state.recording.pending) {
+            startRecording();
+          }
+        }
+      }
+
+      function handleMidiMessage(event) {
+        const data = event.data;
+        const status = data[0];
+        if (status === 0xF8) {
+          handleMidiClockTick(event.timeStamp);
+          return;
+        }
+        if (status === 0xFA) {
+          state.midi.clock.playing = true;
+          setPlayhead(state.midi.clock.songPositionSeconds || 0);
+          return;
+        }
+        if (status === 0xFB) {
+          state.midi.clock.playing = true;
+          return;
+        }
+        if (status === 0xFC) {
+          state.midi.clock.playing = false;
+          if (state.recording.active) stopRecording();
+          return;
+        }
+        if (status === 0xF2 && data.length > 2) {
+          handleSongPositionPointer(data[1], data[2]);
+        }
+      }
+
+      function updateArmedUi() {
+        dom.armBtn.textContent = state.armed ? 'Armed' : 'Arm Recorder';
+        dom.armBtn.classList.toggle('danger', state.armed);
+        setRecordStatus(state.recording.active ? 'recording' : (state.armed ? 'armed' : 'idle'));
+      }
+
+      function updateFps() {
+        state.settings.fps = parseInt(dom.fpsSelect.value, 10);
+        setPlayhead(state.playheadSeconds);
+        renderTakes();
+      }
+
+      function setupEvents() {
+        dom.midiConnectBtn.addEventListener('click', connectMidi);
+        dom.midiInputSelect.addEventListener('change', () => {
+          if (state.midi.connected) {
+            disconnectMidi();
+            connectMidi();
+          }
+        });
+        dom.armBtn.addEventListener('click', () => {
+          state.armed = !state.armed;
+          updateArmedUi();
+        });
+        dom.fpsSelect.addEventListener('change', updateFps);
+        dom.enableCameraBtn.addEventListener('click', () => warmUpCamera(true));
+        dom.refreshDevices.addEventListener('click', refreshDevices);
+        dom.cameraSelect.addEventListener('change', () => {
+          clearCameraStream(true);
+          setCameraStatus('off');
+          updateCameraSourceUI();
+        });
+        dom.resolutionSelect.addEventListener('change', () => {
+          clearCameraStream(true);
+          setCameraStatus('off');
+        });
+        dom.chooseFolderBtn.addEventListener('click', chooseProjectFolder);
+        dom.downloadClipsBtn.addEventListener('click', downloadRecordedClips);
+        dom.exportPackageBtn.addEventListener('click', exportResolvePackage);
+        dom.clearTakesBtn.addEventListener('click', clearTakes);
+        if (dom.copyConvertCmd) {
+          dom.copyConvertCmd.addEventListener('click', async () => {
+            const value = dom.convertCmd.value || '';
+            if (!value || value.startsWith('Add Media Base')) return;
+            try {
+              await navigator.clipboard.writeText(value);
+            } catch (error) {
+              dom.convertCmd.select();
+              document.execCommand('copy');
+            }
+          });
+        }
+        dom.mediaBasePath.addEventListener('input', () => {
+          const normalized = normalizeMediaBaseInput(dom.mediaBasePath.value);
+          state.export.mediaBasePath = normalized;
+          dom.mediaBasePath.value = normalized;
+          window.localStorage.setItem('camorderMediaBasePath', state.export.mediaBasePath);
+          updateConvertCommand();
+        });
+        dom.liveVideo.addEventListener('loadedmetadata', () => {
+          dom.liveVideo.play().catch(() => {});
+        });
+
+        window.addEventListener('beforeunload', (event) => {
+          if (!state.dirty) return;
+          event.preventDefault();
+          event.returnValue = '';
+        });
+      }
+
+      function init() {
+        cacheDom();
+        setupEvents();
+        populateResolutionOptions();
+        refreshDevices();
+        setCameraStatus('off');
+        updateExportNotes();
+        updateBpmDisplay();
+        updateArmedUi();
+        renderTakes();
+        state.export.mediaBasePath = normalizeMediaBaseInput(window.localStorage.getItem('camorderMediaBasePath') || '');
+        dom.mediaBasePath.value = state.export.mediaBasePath;
+        updateConvertCommand();
+        if (navigator.requestMIDIAccess) {
+          setMidiStatus('ready', 'MIDI Ready');
+          requestMidiAccess().then((access) => {
+            if (!access) return;
+            state.midi.access = access;
+            state.midi.access.onstatechange = refreshMidiInputs;
+            refreshMidiInputs();
+          });
+        } else {
+          setMidiStatus('warn', 'MIDI Unsupported');
+          dom.midiConnectBtn.disabled = true;
+          dom.midiInputSelect.disabled = true;
+        }
+      }
+
+      window.addEventListener('load', init);
+    })();
+  </script>
+</body>
+</html>

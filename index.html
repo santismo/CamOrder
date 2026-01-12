@@ -198,13 +198,40 @@
       outline: none;
     }
 
-    #convertCmd {
-      flex: 1;
+    code {
+      background: #0f141a;
+      border: 1px solid #25303b;
+      border-radius: 6px;
+      padding: 6px 8px;
       font-family: "Lucida Console", "Courier New", monospace;
       font-size: 11px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      color: #d9e5ef;
+    }
+
+    .help {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+
+    .folder-status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 700;
+      background: #331618;
+      color: #ff8a8a;
+      border: 1px solid #4a1c22;
+    }
+
+    .folder-status.ready {
+      background: #10351f;
+      color: #6ef19b;
+      border-color: #1f5a36;
     }
 
     button {
@@ -273,7 +300,8 @@
 
     #takesList {
       padding: 8px;
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 6px;
       overflow: auto;
       flex: 1;
@@ -283,9 +311,11 @@
       background: #121820;
       border: 1px solid transparent;
       border-radius: 8px;
-      padding: 8px 10px;
+      padding: 6px;
       display: grid;
-      gap: 4px;
+      grid-template-columns: 54px 1fr;
+      gap: 8px;
+      align-items: center;
     }
 
     .take-title {
@@ -298,21 +328,14 @@
       color: var(--muted);
     }
 
-    .take-actions {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    #exportNotes {
-      font-size: 11px;
-      color: var(--muted);
-      line-height: 1.4;
-      background: #10161d;
+    .take-thumb {
+      width: 54px;
+      height: 36px;
       border-radius: 6px;
-      padding: 8px;
-      border: 1px dashed #2a3541;
-      white-space: pre-wrap;
+      background: #0a0e13;
+      border: 1px solid #1f2a35;
+      background-size: cover;
+      background-position: center;
     }
 
     @media (max-width: 1100px) {
@@ -392,25 +415,20 @@
 
         <div class="panel-header"><h3>Project</h3></div>
         <div class="panel-body">
-          <div class="field">
-            <label>Media Base Path (required for export)</label>
-            <input id="mediaBasePath" type="text" placeholder="file:///Users/name/Project/media" />
-          </div>
-          <div class="field">
-            <label>Convert Command</label>
-            <div class="row">
-              <input id="convertCmd" type="text" readonly value="Add Media Base Path to generate command." />
-              <button id="copyConvertCmd" class="ghost">Copy</button>
-            </div>
-          </div>
           <div class="row">
             <button id="chooseFolderBtn" class="ghost">Choose Project Folder</button>
-            <button id="downloadClipsBtn" class="ghost">Download Clips</button>
+            <span id="folderStatus" class="folder-status">X</span>
           </div>
           <div class="row">
             <button id="exportPackageBtn" class="primary">Export Resolve Package</button>
           </div>
-          <div id="exportNotes"></div>
+          <div class="field">
+            <label>Convert Command</label>
+            <div class="row">
+              <code id="convertCmdInline">sh convert-to-mov.sh</code>
+              <button id="copyConvertBtn" class="ghost">Copy</button>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -470,6 +488,7 @@
         },
         export: {
           mediaBasePath: '',
+          statusMessage: '',
         },
         midi: {
           access: null,
@@ -521,12 +540,10 @@
         dom.enableCameraBtn = document.getElementById('enableCameraBtn');
         dom.refreshDevices = document.getElementById('refreshDevices');
         dom.chooseFolderBtn = document.getElementById('chooseFolderBtn');
-        dom.downloadClipsBtn = document.getElementById('downloadClipsBtn');
         dom.exportPackageBtn = document.getElementById('exportPackageBtn');
-        dom.exportNotes = document.getElementById('exportNotes');
-        dom.mediaBasePath = document.getElementById('mediaBasePath');
-        dom.convertCmd = document.getElementById('convertCmd');
-        dom.copyConvertCmd = document.getElementById('copyConvertCmd');
+        dom.convertCmdInline = document.getElementById('convertCmdInline');
+        dom.copyConvertBtn = document.getElementById('copyConvertBtn');
+        dom.folderStatus = document.getElementById('folderStatus');
         dom.liveVideo = document.getElementById('liveVideo');
         dom.monitorPlaceholder = document.getElementById('monitorPlaceholder');
         dom.takesList = document.getElementById('takesList');
@@ -598,33 +615,47 @@
       }
 
       function updateExportNotes() {
-        const lines = [];
-        lines.push('Stacked FCPXML keeps overlapping clips on separate tracks.');
-        lines.push('Use Media Base Path to auto-link in Resolve (absolute file paths).');
-        lines.push('If Resolve cannot find media: add the project folder to Media Storage and re-import the FCPXML.');
-        lines.push('Run convert-to-mov, then import camorder-stacked-mov.fcpxml.');
-        dom.exportNotes.textContent = lines.join('\n');
+        if (!dom.exportNotes) return;
+        dom.exportNotes.textContent = state.export.statusMessage || '';
+      }
+
+      function setExportStatus(message) {
+        state.export.statusMessage = message || '';
+        updateExportNotes();
+      }
+
+      function updateFolderStatus() {
+        if (!dom.folderStatus) return;
+        if (state.projectHandle) {
+          dom.folderStatus.textContent = '✓';
+          dom.folderStatus.classList.add('ready');
+        } else {
+          dom.folderStatus.textContent = 'X';
+          dom.folderStatus.classList.remove('ready');
+        }
+      }
+
+      async function copyTextToClipboard(text) {
+        if (!text) return false;
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (error) {
+          const temp = document.createElement('textarea');
+          temp.value = text;
+          temp.style.position = 'fixed';
+          temp.style.opacity = '0';
+          document.body.appendChild(temp);
+          temp.focus();
+          temp.select();
+          const ok = document.execCommand('copy');
+          temp.remove();
+          return ok;
+        }
       }
 
       function getConvertCommand() {
-        if (!state.export.mediaBasePath) return '';
-        let base = state.export.mediaBasePath;
-        base = base.replace(/^file:\/\/localhost/, 'file://');
-        base = base.replace(/^file:\/\//, '');
-        base = decodeURIComponent(base);
-        base = base.replace(/\/+$/, '');
-        if (base.toLowerCase().endsWith('/media')) {
-          base = base.slice(0, -'/media'.length);
-        }
-        if (!base) return '';
-        const safePath = base.replace(/"/g, '\\"');
-        return `cd "${safePath}" && sh convert-to-mov.sh`;
-      }
-
-      function updateConvertCommand() {
-        if (!dom.convertCmd) return;
-        const cmd = getConvertCommand();
-        dom.convertCmd.value = cmd || 'Add Media Base Path to generate command.';
+        return 'sh convert-to-mov.sh';
       }
 
       function updateBpmDisplay() {
@@ -788,20 +819,9 @@
         state.projectHandle = await window.showDirectoryPicker();
         const ok = await ensurePermission(state.projectHandle);
         if (!ok) alert('Write permission denied for the selected folder.');
-        if (ok && !state.export.mediaBasePath) {
-          const suggested = window.localStorage.getItem('camorderMediaBasePath') || '';
-          const input = window.prompt('Optional: paste full media folder path for Resolve auto-link (file:///.../media)', suggested);
-          if (input) {
-            let base = normalizeMediaBaseInput(input);
-            if (base && !/\/media$/i.test(base)) {
-              base = `${base}/media`;
-            }
-            state.export.mediaBasePath = base;
-            dom.mediaBasePath.value = base;
-            window.localStorage.setItem('camorderMediaBasePath', base);
-            updateConvertCommand();
-          }
-        }
+        if (!ok) return;
+        setExportStatus('Project folder selected.');
+        updateFolderStatus();
       }
 
       async function saveRecordedClipToProject(clip, blob) {
@@ -828,15 +848,6 @@
         URL.revokeObjectURL(url);
       }
 
-      function downloadRecordedClips() {
-        for (const clip of state.clips) {
-          const media = state.mediaCache.get(clip.id);
-          if (media && media.blob) {
-            downloadBlob(media.blob, clip.filename || `${clip.id}.webm`);
-          }
-        }
-      }
-
       function sanitizeReelName(name) {
         const base = (name || 'REEL').replace(/\.[^/.]+$/, '');
         const clean = base.replace(/[^a-z0-9]/gi, '_').toUpperCase();
@@ -860,14 +871,6 @@
         return value.replace(/\/+$/, '');
       }
 
-      function normalizeMediaBaseInput(value) {
-        const cleaned = sanitizeBasePath(value);
-        if (!cleaned) return '';
-        if (cleaned.startsWith('file://')) return cleaned;
-        if (cleaned.startsWith('/')) return `file://${cleaned}`;
-        return cleaned;
-      }
-
       function makeFileUrl(path, filename) {
         const base = sanitizeBasePath(path);
         if (!base) return `media/${filename}`;
@@ -884,38 +887,6 @@
         const combined = `${normalized}/${filename}`;
         const encoded = combined.split('/').map(encodeURIComponent).join('/');
         return `${prefix}${encoded}`;
-      }
-
-      function getShellExportHint() {
-        if (!state.export.mediaBasePath) return '';
-        let base = state.export.mediaBasePath;
-        base = base.replace(/^file:\/\/localhost/, 'file://');
-        base = base.replace(/^file:\/\//, '');
-        base = decodeURIComponent(base);
-        base = base.replace(/\/+$/, '');
-        if (base.toLowerCase().endsWith('/media')) {
-          base = base.slice(0, -'/media'.length);
-        }
-        if (!base) return '';
-        const safePath = base.replace(/"/g, '\\"');
-        return `cd "${safePath}"\nsh convert-to-mov.sh`;
-      }
-
-      function sanitizeBasePath(path) {
-        if (!path) return '';
-        let value = path.trim();
-        if (!value) return '';
-        value = value.replace(/\\/g, '/');
-        return value.replace(/\/+$/, '');
-      }
-
-      function makeFileUrl(path, filename) {
-        const base = sanitizeBasePath(path);
-        if (!base) return `media/${filename}`;
-        const combined = `${base}/${filename}`;
-        if (combined.startsWith('file://')) return combined;
-        const encoded = combined.split('/').map(encodeURIComponent).join('/');
-        return `file://${encoded}`;
       }
 
       function getPlacementsForExport() {
@@ -1177,17 +1148,9 @@
           '  [ -e "$f" ] || continue',
           '  base=$(basename "$f" .webm)',
           '  ffmpeg -y -i "$f" -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -an "media/${base}.mov"',
+          '  rm -f "$f"',
           'done',
         ].join('\n');
-      }
-
-      function buildFfmpegScriptBat() {
-        return [
-          '@echo off',
-          'for %%f in (media\\*.webm) do (',
-          '  ffmpeg -y -i "%%f" -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -an "media\\%%~nf.mov"',
-          ')',
-        ].join('\r\n');
       }
 
       async function writeProjectFile(filename, content, contentType = 'text/plain') {
@@ -1201,6 +1164,18 @@
         return true;
       }
 
+      async function writeMediaFile(filename, content, contentType = 'text/plain') {
+        if (!state.projectHandle) return false;
+        const ok = await ensurePermission(state.projectHandle);
+        if (!ok) return false;
+        const mediaDir = await state.projectHandle.getDirectoryHandle('media', { create: true });
+        const handle = await mediaDir.getFileHandle(filename, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(new Blob([content], { type: contentType }));
+        await writable.close();
+        return true;
+      }
+
       async function removeExportArtifacts() {
         if (!state.projectHandle || !state.projectHandle.removeEntry) return;
         const ok = await ensurePermission(state.projectHandle);
@@ -1208,7 +1183,6 @@
         const files = [
           'camorder-stacked-mov.fcpxml',
           'convert-to-mov.sh',
-          'convert-to-mov.bat',
         ];
         for (const filename of files) {
           try {
@@ -1219,6 +1193,14 @@
             }
           }
         }
+        try {
+          const mediaDir = await state.projectHandle.getDirectoryHandle('media', { create: false });
+          await mediaDir.removeEntry('camorder-stacked-mov.fcpxml');
+        } catch (error) {
+          if (error && error.name !== 'NotFoundError') {
+            console.warn('Failed to remove media export file', error);
+          }
+        }
       }
 
       async function exportResolvePackage() {
@@ -1226,12 +1208,8 @@
           await chooseProjectFolder();
         }
         if (!state.projectHandle && window.showDirectoryPicker) {
-          alert('Choose a project folder to export a Resolve package.');
-          return;
-        }
-        if (!state.export.mediaBasePath) {
-          alert('Media Base Path is required so Resolve can auto-link.');
-          dom.mediaBasePath.focus();
+          setExportStatus('Export canceled. Choose a project folder first.');
+          updateFolderStatus();
           return;
         }
         if (state.projectHandle) {
@@ -1241,19 +1219,23 @@
         const xmlMovName = 'camorder-stacked-mov.fcpxml';
 
         if (state.projectHandle) {
-          await writeProjectFile(xmlMovName, fcpxmlMov, 'application/xml');
+          await writeMediaFile(xmlMovName, fcpxmlMov, 'application/xml');
           await writeProjectFile('convert-to-mov.sh', buildFfmpegScriptSh(), 'text/x-shellscript');
-          await writeProjectFile('convert-to-mov.bat', buildFfmpegScriptBat(), 'text/plain');
         } else {
           downloadBlob(new Blob([fcpxmlMov], { type: 'application/xml' }), xmlMovName);
           downloadBlob(new Blob([buildFfmpegScriptSh()], { type: 'text/x-shellscript' }), 'convert-to-mov.sh');
-          downloadBlob(new Blob([buildFfmpegScriptBat()], { type: 'text/plain' }), 'convert-to-mov.bat');
         }
-        const hint = getShellExportHint();
-        const message = hint
-          ? `Resolve package exported.\n\nRun this in Terminal:\n${hint}\n\nThen import camorder-stacked-mov.fcpxml and relink to /media.`
-          : 'Resolve package exported. Run convert-to-mov, then import camorder-stacked-mov.fcpxml and relink to /media.';
-        alert(message);
+        const hint = getConvertCommand();
+        if (hint) {
+          const copied = await copyTextToClipboard(hint);
+          setExportStatus(
+            copied
+              ? 'Resolve package exported. Convert command copied to clipboard.'
+              : 'Resolve package exported. Use the Copy button in the Project panel.'
+          );
+        } else {
+          setExportStatus('Resolve package exported. Convert command unavailable for this folder selection.');
+        }
       }
 
       function getClipById(clipId) {
@@ -1348,6 +1330,47 @@
         }
       }
 
+      function generateThumbnail(clip, blob) {
+        return new Promise((resolve) => {
+          const url = URL.createObjectURL(blob);
+          const video = document.createElement('video');
+          video.preload = 'metadata';
+          video.muted = true;
+          video.src = url;
+
+          const cleanup = () => {
+            URL.revokeObjectURL(url);
+          };
+
+          video.addEventListener('loadedmetadata', () => {
+            const target = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(0.1, video.duration / 2) : 0;
+            try {
+              video.currentTime = target;
+            } catch (error) {
+              cleanup();
+              resolve('');
+            }
+          }, { once: true });
+
+          video.addEventListener('seeked', () => {
+            const canvas = document.createElement('canvas');
+            const width = video.videoWidth || 160;
+            const height = video.videoHeight || 90;
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) ctx.drawImage(video, 0, 0, width, height);
+            cleanup();
+            resolve(canvas.toDataURL('image/jpeg', 0.7));
+          }, { once: true });
+
+          video.addEventListener('error', () => {
+            cleanup();
+            resolve('');
+          }, { once: true });
+        });
+      }
+
       function finalizeRecording(recording) {
         const clip = getClipById(recording.clipId);
         if (!clip) return;
@@ -1373,6 +1396,11 @@
         setCameraStatus(state.camera.stream && state.camera.stream.active ? 'ready' : 'off');
         markDirty();
         renderTakes();
+        generateThumbnail(clip, blob).then((thumb) => {
+          if (!thumb) return;
+          clip.thumbnail = thumb;
+          renderTakes();
+        });
       }
 
       function stopRecording() {
@@ -1397,6 +1425,12 @@
           const placement = state.placements.find((item) => item.clipId === clip.id);
           const item = document.createElement('div');
           item.className = 'take-item';
+          const thumb = document.createElement('div');
+          thumb.className = 'take-thumb';
+          if (clip.thumbnail) {
+            thumb.style.backgroundImage = `url(${clip.thumbnail})`;
+          }
+          const info = document.createElement('div');
           const title = document.createElement('div');
           title.className = 'take-title';
           title.textContent = clip.name;
@@ -1405,21 +1439,10 @@
           const startTc = secondsToSMPTE(clip.startSeconds || 0, state.settings.fps);
           const dur = placement ? placement.durationSeconds : clip.durationSeconds;
           meta.textContent = `Start ${startTc} | ${dur.toFixed(2)}s | ${clip.filename}`;
-          const actions = document.createElement('div');
-          actions.className = 'take-actions';
-          const dlBtn = document.createElement('button');
-          dlBtn.className = 'ghost';
-          dlBtn.textContent = 'Download';
-          dlBtn.addEventListener('click', () => {
-            const media = state.mediaCache.get(clip.id);
-            if (media && media.blob) {
-              downloadBlob(media.blob, clip.filename || `${clip.id}.webm`);
-            }
-          });
-          actions.appendChild(dlBtn);
-          item.appendChild(title);
-          item.appendChild(meta);
-          item.appendChild(actions);
+          info.appendChild(title);
+          info.appendChild(meta);
+          item.appendChild(thumb);
+          item.appendChild(info);
           fragment.appendChild(item);
         });
         dom.takesList.appendChild(fragment);
@@ -1617,28 +1640,15 @@
           setCameraStatus('off');
         });
         dom.chooseFolderBtn.addEventListener('click', chooseProjectFolder);
-        dom.downloadClipsBtn.addEventListener('click', downloadRecordedClips);
         dom.exportPackageBtn.addEventListener('click', exportResolvePackage);
         dom.clearTakesBtn.addEventListener('click', clearTakes);
-        if (dom.copyConvertCmd) {
-          dom.copyConvertCmd.addEventListener('click', async () => {
-            const value = dom.convertCmd.value || '';
-            if (!value || value.startsWith('Add Media Base')) return;
-            try {
-              await navigator.clipboard.writeText(value);
-            } catch (error) {
-              dom.convertCmd.select();
-              document.execCommand('copy');
-            }
+        if (dom.copyConvertBtn) {
+          dom.copyConvertBtn.addEventListener('click', async () => {
+            const value = getConvertCommand();
+            const copied = await copyTextToClipboard(value);
+            if (copied) setExportStatus('Convert command copied to clipboard.');
           });
         }
-        dom.mediaBasePath.addEventListener('input', () => {
-          const normalized = normalizeMediaBaseInput(dom.mediaBasePath.value);
-          state.export.mediaBasePath = normalized;
-          dom.mediaBasePath.value = normalized;
-          window.localStorage.setItem('camorderMediaBasePath', state.export.mediaBasePath);
-          updateConvertCommand();
-        });
         dom.liveVideo.addEventListener('loadedmetadata', () => {
           dom.liveVideo.play().catch(() => {});
         });
@@ -1657,12 +1667,10 @@
         refreshDevices();
         setCameraStatus('off');
         updateExportNotes();
+        updateFolderStatus();
         updateBpmDisplay();
         updateArmedUi();
         renderTakes();
-        state.export.mediaBasePath = normalizeMediaBaseInput(window.localStorage.getItem('camorderMediaBasePath') || '');
-        dom.mediaBasePath.value = state.export.mediaBasePath;
-        updateConvertCommand();
         if (navigator.requestMIDIAccess) {
           setMidiStatus('ready', 'MIDI Ready');
           requestMidiAccess().then((access) => {
@@ -1683,4 +1691,3 @@
   </script>
 </body>
 </html>
-

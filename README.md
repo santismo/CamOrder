@@ -1,2 +1,2 @@
 # CamOrder
-Midi time code to FCPXML video timeline automation.
+MIDI clock synced video capture for DAWs

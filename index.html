@@ -138,6 +138,39 @@
       min-height: 0;
     }
 
+    #app.timeline-enabled #content {
+      grid-template-rows: auto 260px;
+    }
+
+    #app.timeline-enabled #monitor {
+      max-height: 220px;
+    }
+
+    #app.timeline-enabled #monitor {
+      grid-column: 3;
+      grid-row: 1;
+      align-self: start;
+    }
+
+    #app.timeline-enabled #takes {
+      grid-column: 2;
+      grid-row: 1;
+    }
+
+    #app.timeline-enabled #controls {
+      overflow: auto;
+    }
+
+    #timelinePanel {
+      display: none;
+      grid-column: 1 / -1;
+      min-height: 220px;
+    }
+
+    #app.timeline-enabled #timelinePanel {
+      display: flex;
+    }
+
     .panel {
       background: linear-gradient(180deg, #1a222b, #182029);
       border: 1px solid var(--panel-edge);
@@ -285,6 +318,10 @@
       justify-content: center;
     }
 
+    #app.timeline-enabled #monitorFrame {
+      margin: 6px;
+    }
+
     #liveVideo {
       width: 100%;
       height: 100%;
@@ -305,6 +342,43 @@
       gap: 6px;
       overflow: auto;
       flex: 1;
+    }
+
+    #app.timeline-enabled #takesList {
+      display: none;
+    }
+
+    #stageView {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px;
+      overflow: auto;
+    }
+
+    #app.timeline-enabled #stageView {
+      display: flex;
+    }
+
+    .stage-current {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .stage-item {
+      font-size: 11px;
+      color: var(--muted);
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #1f2a35;
+      background: #0f141a;
+    }
+
+    .stage-item.top {
+      color: #d9e5ef;
+      border-color: #2f4a60;
+      background: #16202a;
     }
 
     .take-item {
@@ -338,6 +412,154 @@
       background-position: center;
     }
 
+    .take-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .take-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .take-delete {
+      font-size: 11px;
+      padding: 4px 6px;
+    }
+
+    #timelineBody {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+
+    #timelineViewport {
+      position: relative;
+      flex: 1;
+      overflow: auto;
+      background: #0a0e13;
+      border-top: 1px solid #1f2a35;
+    }
+
+    #timelineViewport::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    #timelineViewport::-webkit-scrollbar-track {
+      background: #0b1016;
+    }
+
+    #timelineViewport::-webkit-scrollbar-thumb {
+      background: #1f2a35;
+      border-radius: 8px;
+      border: 1px solid #0b1016;
+    }
+
+    #timelineViewport::-webkit-scrollbar-thumb:hover {
+      background: #2b3847;
+    }
+
+    #monitorProjectSlot {
+      padding: 0 10px 10px;
+    }
+
+    #timelineCanvas {
+      position: relative;
+      min-height: 100%;
+      background-color: #0b1016;
+    }
+
+    #timelineRuler {
+      position: relative;
+      height: 24px;
+      border-bottom: 1px solid #1f2a35;
+      background: rgba(12, 16, 22, 0.9);
+      z-index: 2;
+    }
+
+    .ruler-label {
+      position: absolute;
+      top: 4px;
+      font-size: 10px;
+      color: var(--muted);
+      transform: translateX(-50%);
+      white-space: nowrap;
+    }
+
+    #timelineLanes {
+      position: relative;
+    }
+
+    .timeline-lane {
+      position: relative;
+      height: 54px;
+      border-bottom: 1px solid #1b2430;
+    }
+
+    .timeline-clip {
+      position: absolute;
+      top: 7px;
+      height: 40px;
+      background: #2a3a4b;
+      border: 1px solid #3e566f;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: #d9e5ef;
+      cursor: grab;
+      box-sizing: border-box;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .timeline-clip.selected {
+      outline: 1px solid var(--accent);
+      box-shadow: 0 0 0 1px rgba(46, 196, 182, 0.35);
+    }
+
+    .clip-handle {
+      position: absolute;
+      top: 0;
+      width: 6px;
+      height: 100%;
+      background: rgba(79, 104, 131, 0.9);
+      cursor: ew-resize;
+    }
+
+    .clip-handle.left {
+      left: 0;
+      border-top-left-radius: 6px;
+      border-bottom-left-radius: 6px;
+    }
+
+    .clip-handle.right {
+      right: 0;
+      border-top-right-radius: 6px;
+      border-bottom-right-radius: 6px;
+    }
+
+    #timelinePlayhead {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: rgba(255, 77, 77, 0.8);
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    #experimentalBar {
+      margin-top: 10px;
+      display: flex;
+      justify-content: center;
+    }
+
     @media (max-width: 1100px) {
       #content {
         grid-template-columns: 1fr;
@@ -366,6 +588,7 @@
         <span id="midiStatus" class="pill">MIDI Off</span>
         <span id="recordStatus" class="pill">Idle</span>
         <span id="cameraStatus" class="pill">Camera Off</span>
+        <span id="folderPill" class="pill">Folder Missing</span>
       </div>
       <div id="timeRow">
         <span id="timeDisplay">00:00:00:00</span>
@@ -413,20 +636,24 @@
           </div>
         </div>
 
-        <div class="panel-header"><h3>Project</h3></div>
-        <div class="panel-body">
-          <div class="row">
-            <button id="chooseFolderBtn" class="ghost">Choose Project Folder</button>
-            <span id="folderStatus" class="folder-status">X</span>
-          </div>
-          <div class="row">
-            <button id="exportPackageBtn" class="primary">Export Resolve Package</button>
-          </div>
-          <div class="field">
-            <label>Convert Command</label>
-            <div class="row">
-              <code id="convertCmdInline">sh convert-to-mov.sh</code>
-              <button id="copyConvertBtn" class="ghost">Copy</button>
+        <div id="projectSlot">
+          <div id="projectBlock">
+            <div class="panel-header"><h3>Project</h3></div>
+            <div class="panel-body">
+              <div class="row">
+                <button id="chooseFolderBtn" class="ghost">Choose Project Folder</button>
+                <span id="folderStatus" class="folder-status">X</span>
+              </div>
+              <div class="row">
+                <button id="exportPackageBtn" class="primary">Export Resolve Package</button>
+              </div>
+              <div class="field">
+                <label>Convert Command</label>
+                <div class="row">
+                  <code id="convertCmdInline">sh convert-to-mov.sh</code>
+                  <button id="copyConvertBtn" class="ghost">Copy</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -438,16 +665,46 @@
           <video id="liveVideo" muted playsinline autoplay></video>
           <div id="monitorPlaceholder">Enable camera to preview the feed.</div>
         </div>
+        <div id="monitorProjectSlot"></div>
       </section>
 
       <aside id="takes" class="panel">
         <div class="panel-header">
-          <h3>Takes</h3>
-          <button id="clearTakesBtn" class="ghost">Clear</button>
+          <h3 id="takesHeader">Takes</h3>
         </div>
         <div id="takesList"></div>
+        <div id="stageView">
+          <div id="stageCurrent" class="stage-current">Stage: None</div>
+          <div id="stageList"></div>
+        </div>
       </aside>
+
+      <section id="timelinePanel" class="panel">
+        <div class="panel-header">
+          <h3>Experimental Timeline</h3>
+          <div class="row">
+            <label>Record Lane
+              <select id="laneSelect"></select>
+            </label>
+            <button id="addLaneBtn" class="ghost">Add Lane</button>
+            <button id="deletePlacementBtn" class="ghost">Delete Clip</button>
+          </div>
+        </div>
+        <div id="timelineBody">
+          <div id="timelineViewport">
+            <div id="timelineCanvas">
+              <div id="timelineRuler"></div>
+              <div id="timelineLanes"></div>
+              <div id="timelinePlayhead"></div>
+            </div>
+          </div>
+        </div>
+      </section>
     </section>
+
+    <div id="experimentalBar">
+      <button id="toggleTimelineBtn" class="ghost">Experimental Video Timeline</button>
+    </div>
   </div>
 
   <script>
@@ -514,6 +771,17 @@
           recorder: null,
           chunks: [],
         },
+        timeline: {
+          enabled: false,
+          lanes: 3,
+          selectedLane: 0,
+          pxPerBeat: 84,
+          subdivisions: 4,
+          beatsPerBar: 4,
+          selectionId: null,
+          drag: null,
+          lastGridBpm: 0,
+        },
         clips: [],
         placements: [],
         mediaCache: new Map(),
@@ -535,6 +803,7 @@
         dom.midiConnectBtn = document.getElementById('midiConnectBtn');
         dom.armBtn = document.getElementById('armBtn');
         dom.fpsSelect = document.getElementById('fpsSelect');
+        dom.folderPill = document.getElementById('folderPill');
         dom.cameraSelect = document.getElementById('cameraSelect');
         dom.resolutionSelect = document.getElementById('resolutionSelect');
         dom.enableCameraBtn = document.getElementById('enableCameraBtn');
@@ -546,8 +815,24 @@
         dom.folderStatus = document.getElementById('folderStatus');
         dom.liveVideo = document.getElementById('liveVideo');
         dom.monitorPlaceholder = document.getElementById('monitorPlaceholder');
+        dom.projectBlock = document.getElementById('projectBlock');
+        dom.projectSlot = document.getElementById('projectSlot');
+        dom.monitorProjectSlot = document.getElementById('monitorProjectSlot');
         dom.takesList = document.getElementById('takesList');
-        dom.clearTakesBtn = document.getElementById('clearTakesBtn');
+        dom.takesHeader = document.getElementById('takesHeader');
+        dom.stageView = document.getElementById('stageView');
+        dom.stageCurrent = document.getElementById('stageCurrent');
+        dom.stageList = document.getElementById('stageList');
+        dom.timelinePanel = document.getElementById('timelinePanel');
+        dom.timelineViewport = document.getElementById('timelineViewport');
+        dom.timelineCanvas = document.getElementById('timelineCanvas');
+        dom.timelineRuler = document.getElementById('timelineRuler');
+        dom.timelineLanes = document.getElementById('timelineLanes');
+        dom.timelinePlayhead = document.getElementById('timelinePlayhead');
+        dom.laneSelect = document.getElementById('laneSelect');
+        dom.addLaneBtn = document.getElementById('addLaneBtn');
+        dom.deletePlacementBtn = document.getElementById('deletePlacementBtn');
+        dom.toggleTimelineBtn = document.getElementById('toggleTimelineBtn');
       }
 
       function markDirty() {
@@ -562,6 +847,8 @@
         const snapped = Math.max(0, snapSeconds(seconds, state.settings.fps));
         state.playheadSeconds = snapped;
         dom.timeDisplay.textContent = secondsToSMPTE(snapped, state.settings.fps);
+        updateTimelinePlayhead();
+        renderStageView();
       }
 
       function setMidiStatus(status, label = '') {
@@ -627,12 +914,312 @@
       function updateFolderStatus() {
         if (!dom.folderStatus) return;
         if (state.projectHandle) {
-          dom.folderStatus.textContent = '✓';
+          dom.folderStatus.textContent = 'OK';
           dom.folderStatus.classList.add('ready');
+          if (dom.folderPill) {
+            dom.folderPill.textContent = 'Folder Ready';
+            dom.folderPill.className = 'pill live';
+          }
         } else {
           dom.folderStatus.textContent = 'X';
           dom.folderStatus.classList.remove('ready');
+          if (dom.folderPill) {
+            dom.folderPill.textContent = 'Folder Missing';
+            dom.folderPill.className = 'pill warn';
+          }
         }
+      }
+
+      function moveProjectBlock() {
+        if (!dom.projectBlock || !dom.projectSlot || !dom.monitorProjectSlot) return;
+        const target = state.timeline.enabled ? dom.monitorProjectSlot : dom.projectSlot;
+        if (dom.projectBlock.parentElement !== target) {
+          target.appendChild(dom.projectBlock);
+        }
+      }
+
+      function getActivePlacementsAtPlayhead() {
+        return state.placements.filter((placement) => {
+          const start = placement.timelineStartSeconds;
+          const end = placement.timelineStartSeconds + placement.durationSeconds;
+          return state.playheadSeconds >= start && state.playheadSeconds <= end;
+        });
+      }
+
+      function renderStageView() {
+        if (!dom.stageCurrent || !dom.stageList) return;
+        if (!state.timeline.enabled) return;
+        const active = getActivePlacementsAtPlayhead();
+        const enriched = active.map((placement) => {
+          const clip = getClipById(placement.clipId);
+          return {
+            placement,
+            clip,
+            lane: typeof placement.lane === 'number' ? placement.lane : 0,
+          };
+        });
+        enriched.sort((a, b) => a.lane - b.lane);
+        const top = enriched.length ? enriched[enriched.length - 1] : null;
+        dom.stageCurrent.textContent = top && top.clip
+          ? `Stage: ${top.clip.name}`
+          : 'Stage: None';
+        dom.stageList.innerHTML = '';
+        if (!enriched.length) {
+          const empty = document.createElement('div');
+          empty.className = 'stage-item';
+          empty.textContent = 'No clips at playhead.';
+          dom.stageList.appendChild(empty);
+          return;
+        }
+        enriched.forEach((item) => {
+          const row = document.createElement('div');
+          row.className = 'stage-item';
+          if (top && item === top) row.classList.add('top');
+          const name = item.clip ? item.clip.name : item.placement.clipId;
+          row.textContent = `Lane ${item.lane + 1}: ${name}`;
+          dom.stageList.appendChild(row);
+        });
+      }
+
+      function getBpm() {
+        return Math.max(20, state.midi.clock.bpm || 120);
+      }
+
+      function getSecondsPerBeat() {
+        return 60 / getBpm();
+      }
+
+      function snapToBeatGrid(seconds) {
+        const grid = getSecondsPerBeat() / state.timeline.subdivisions;
+        if (!grid) return seconds;
+        return Math.max(0, Math.round(seconds / grid) * grid);
+      }
+
+      function timeToPx(seconds) {
+        return (seconds / getSecondsPerBeat()) * state.timeline.pxPerBeat;
+      }
+
+      function pxToTime(pixels) {
+        return (pixels / state.timeline.pxPerBeat) * getSecondsPerBeat();
+      }
+
+      function updateLaneSelect() {
+        if (!dom.laneSelect) return;
+        if (state.timeline.selectedLane >= state.timeline.lanes) {
+          state.timeline.selectedLane = Math.max(0, state.timeline.lanes - 1);
+        }
+        dom.laneSelect.innerHTML = '';
+        for (let i = 0; i < state.timeline.lanes; i += 1) {
+          const opt = document.createElement('option');
+          opt.value = String(i);
+          opt.textContent = `Lane ${i + 1}`;
+          dom.laneSelect.appendChild(opt);
+        }
+        dom.laneSelect.value = String(state.timeline.selectedLane);
+      }
+
+      function getTimelineSpanSeconds() {
+        const baseline = Math.max(getTimelineDurationSeconds(), state.playheadSeconds);
+        const beatsAhead = state.timeline.beatsPerBar * 4;
+        return Math.max(baseline, state.playheadSeconds + getSecondsPerBeat() * beatsAhead);
+      }
+
+      function updateTimelineGrid(widthPx) {
+        if (!dom.timelineCanvas) return;
+        const beatPx = state.timeline.pxPerBeat;
+        const subPx = beatPx / state.timeline.subdivisions;
+        const barPx = beatPx * state.timeline.beatsPerBar;
+        dom.timelineCanvas.style.backgroundImage = [
+          'linear-gradient(to right, rgba(42, 53, 65, 0.55) 1px, transparent 1px)',
+          'linear-gradient(to right, rgba(28, 37, 47, 0.5) 1px, transparent 1px)',
+          'linear-gradient(to right, rgba(22, 28, 36, 0.35) 1px, transparent 1px)',
+        ].join(', ');
+        dom.timelineCanvas.style.backgroundSize = `${barPx}px 100%, ${beatPx}px 100%, ${subPx}px 100%`;
+        dom.timelineCanvas.style.width = `${Math.max(widthPx, dom.timelineViewport.clientWidth)}px`;
+      }
+
+      function renderTimelineRuler(spanSeconds) {
+        if (!dom.timelineRuler) return;
+        dom.timelineRuler.innerHTML = '';
+        const beats = Math.ceil(spanSeconds / getSecondsPerBeat());
+        const totalBars = Math.max(1, Math.ceil(beats / state.timeline.beatsPerBar));
+        for (let bar = 0; bar <= totalBars; bar += 1) {
+          const beat = bar * state.timeline.beatsPerBar;
+          const seconds = beat * getSecondsPerBeat();
+          const left = timeToPx(seconds);
+          const label = document.createElement('div');
+          label.className = 'ruler-label';
+          label.style.left = `${left}px`;
+          label.textContent = `Bar ${bar + 1}`;
+          dom.timelineRuler.appendChild(label);
+        }
+      }
+
+      function renderTimeline() {
+        if (!state.timeline.enabled) return;
+        if (!dom.timelineCanvas || !dom.timelineLanes) return;
+        updateLaneSelect();
+        const spanSeconds = getTimelineSpanSeconds();
+        const widthPx = timeToPx(spanSeconds) + 200;
+        updateTimelineGrid(widthPx);
+        dom.timelineRuler.style.width = dom.timelineCanvas.style.width;
+        dom.timelineLanes.style.width = dom.timelineCanvas.style.width;
+        renderTimelineRuler(spanSeconds);
+
+        dom.timelineLanes.innerHTML = '';
+        for (let lane = 0; lane < state.timeline.lanes; lane += 1) {
+          const row = document.createElement('div');
+          row.className = 'timeline-lane';
+          row.dataset.lane = String(lane);
+          dom.timelineLanes.appendChild(row);
+        }
+
+        const placements = state.placements.filter((placement) => placement.durationSeconds > 0.01);
+        placements.forEach((placement) => {
+          if (typeof placement.lane !== 'number') placement.lane = 0;
+          const laneIndex = Math.max(0, Math.min(state.timeline.lanes - 1, placement.lane));
+          const row = dom.timelineLanes.querySelector(`[data-lane="${laneIndex}"]`);
+          if (!row) return;
+          const clip = getClipById(placement.clipId);
+          const clipEl = document.createElement('div');
+          clipEl.className = 'timeline-clip';
+          clipEl.dataset.placementId = placement.id;
+          const clipStart = placement.timelineStartSeconds;
+          const duration = Math.max(0.01, placement.durationSeconds);
+          clipEl.style.left = `${timeToPx(clipStart)}px`;
+          clipEl.style.width = `${Math.max(12, timeToPx(duration))}px`;
+          clipEl.textContent = clip ? clip.name : placement.clipId;
+          if (state.timeline.selectionId === placement.id) {
+            clipEl.classList.add('selected');
+          }
+          const leftHandle = document.createElement('div');
+          leftHandle.className = 'clip-handle left';
+          const rightHandle = document.createElement('div');
+          rightHandle.className = 'clip-handle right';
+          clipEl.appendChild(leftHandle);
+          clipEl.appendChild(rightHandle);
+          row.appendChild(clipEl);
+        });
+
+        updateTimelinePlayhead();
+        renderStageView();
+      }
+
+      function updateTimelinePlayhead() {
+        if (!state.timeline.enabled || !dom.timelinePlayhead) return;
+        const left = timeToPx(state.playheadSeconds);
+        dom.timelinePlayhead.style.left = `${left}px`;
+      }
+
+      function updateTimelineRecordingClip() {
+        if (!state.timeline.enabled || !state.recording.active) return;
+        const placement = state.placements.find((item) => item.clipId === state.recording.clipId);
+        if (!placement) return;
+        const el = dom.timelineCanvas
+          ? dom.timelineCanvas.querySelector(`[data-placement-id="${placement.id}"]`)
+          : null;
+        if (!el) {
+          renderTimeline();
+          return;
+        }
+        el.style.left = `${timeToPx(placement.timelineStartSeconds)}px`;
+        el.style.width = `${Math.max(12, timeToPx(placement.durationSeconds))}px`;
+      }
+
+      function selectPlacement(placementId) {
+        state.timeline.selectionId = placementId;
+        renderTimeline();
+      }
+
+      function deleteSelectedPlacement() {
+        const selection = state.timeline.selectionId;
+        if (!selection) return;
+        state.placements = state.placements.filter((placement) => placement.id !== selection);
+        state.timeline.selectionId = null;
+        markDirty();
+        renderTimeline();
+      }
+
+      function handleTimelineMouseDown(event) {
+        if (!state.timeline.enabled) return;
+        if (!dom.timelineCanvas || !dom.timelineViewport) return;
+        const clipEl = event.target.closest('.timeline-clip');
+        if (clipEl) {
+          const placementId = clipEl.dataset.placementId;
+          const placement = getPlacementById(placementId);
+          if (!placement) return;
+          selectPlacement(placementId);
+          const rect = clipEl.getBoundingClientRect();
+          const handle = event.target.classList.contains('clip-handle')
+            ? (event.target.classList.contains('left') ? 'trim-left' : 'trim-right')
+            : 'move';
+          state.timeline.drag = {
+            type: handle,
+            placementId,
+            startX: event.clientX,
+            startY: event.clientY,
+            startStart: placement.timelineStartSeconds,
+            startDuration: placement.durationSeconds,
+            startClipIn: placement.clipInSeconds,
+            lane: placement.lane || 0,
+            rectTop: rect.top,
+          };
+          event.preventDefault();
+          return;
+        }
+
+        const canvasRect = dom.timelineCanvas.getBoundingClientRect();
+        const x = event.clientX - canvasRect.left + dom.timelineViewport.scrollLeft;
+        const seconds = snapToBeatGrid(pxToTime(x));
+        setPlayhead(seconds);
+        if (state.timeline.selectionId) {
+          state.timeline.selectionId = null;
+          renderTimeline();
+        }
+      }
+
+      function handleTimelineMouseMove(event) {
+        if (!state.timeline.drag) return;
+        if (!dom.timelineLanes || !dom.timelineViewport) return;
+        const drag = state.timeline.drag;
+        const placement = getPlacementById(drag.placementId);
+        if (!placement) return;
+        const deltaPx = event.clientX - drag.startX;
+        const deltaSeconds = pxToTime(deltaPx);
+        if (drag.type === 'move') {
+          const newStart = snapToBeatGrid(drag.startStart + deltaSeconds);
+          placement.timelineStartSeconds = Math.max(0, newStart);
+          const lanesRect = dom.timelineLanes.getBoundingClientRect();
+          const y = event.clientY - lanesRect.top + dom.timelineViewport.scrollTop;
+          const laneIndex = Math.max(0, Math.min(state.timeline.lanes - 1, Math.floor(y / 54)));
+          placement.lane = laneIndex;
+        } else if (drag.type === 'trim-left') {
+          const clip = getClipById(placement.clipId);
+          if (!clip) return;
+          const newStart = snapToBeatGrid(drag.startStart + deltaSeconds);
+          const maxStart = drag.startStart + drag.startDuration - 0.1;
+          const clampedStart = Math.min(maxStart, Math.max(0, newStart));
+          const delta = clampedStart - drag.startStart;
+          const newClipIn = Math.max(0, drag.startClipIn + delta);
+          const maxClipIn = Math.max(0, clip.durationSeconds - 0.1);
+          placement.timelineStartSeconds = clampedStart;
+          placement.clipInSeconds = Math.min(maxClipIn, newClipIn);
+          placement.durationSeconds = Math.max(0.1, drag.startDuration - delta);
+        } else if (drag.type === 'trim-right') {
+          const clip = getClipById(placement.clipId);
+          if (!clip) return;
+          const newDur = snapToBeatGrid(drag.startDuration + deltaSeconds);
+          const maxDur = Math.max(0.1, clip.durationSeconds - placement.clipInSeconds);
+          placement.durationSeconds = Math.min(maxDur, Math.max(0.1, newDur));
+        }
+        placement.clipOutSeconds = placement.clipInSeconds + placement.durationSeconds;
+        markDirty();
+        renderTimeline();
+      }
+
+      function handleTimelineMouseUp() {
+        if (!state.timeline.drag) return;
+        state.timeline.drag = null;
       }
 
       async function copyTextToClipboard(text) {
@@ -660,6 +1247,12 @@
 
       function updateBpmDisplay() {
         dom.bpmDisplay.textContent = `${state.midi.clock.bpm.toFixed(1)} BPM`;
+        if (!state.timeline.enabled) return;
+        const bpm = getBpm();
+        if (Math.abs(bpm - state.timeline.lastGridBpm) >= 0.2) {
+          state.timeline.lastGridBpm = bpm;
+          renderTimeline();
+        }
       }
 
       function populateResolutionOptions() {
@@ -1257,12 +1850,10 @@
 
       async function startRecording() {
         if (state.recording.active || state.recording.pending) return;
-        if (window.showDirectoryPicker && !state.projectHandle) {
-          await chooseProjectFolder();
-          if (!state.projectHandle) {
-            alert('Choose a project folder before recording so clips can be saved.');
-            return;
-          }
+        if (!state.projectHandle) {
+          setExportStatus('Choose a project folder before recording.');
+          updateFolderStatus();
+          return;
         }
         if (!state.armed) return;
 
@@ -1295,6 +1886,7 @@
           clipInSeconds: 0,
           clipOutSeconds: 0,
           durationSeconds: 0,
+          lane: state.timeline.selectedLane || 0,
         };
         state.placements.push(placement);
 
@@ -1328,6 +1920,8 @@
           placement.durationSeconds = duration;
           placement.clipOutSeconds = placement.clipInSeconds + duration;
         }
+        updateTimelineRecordingClip();
+        renderStageView();
       }
 
       function generateThumbnail(clip, blob) {
@@ -1396,11 +1990,13 @@
         setCameraStatus(state.camera.stream && state.camera.stream.active ? 'ready' : 'off');
         markDirty();
         renderTakes();
+        renderTimeline();
         generateThumbnail(clip, blob).then((thumb) => {
           if (!thumb) return;
           clip.thumbnail = thumb;
           renderTakes();
         });
+        renderStageView();
       }
 
       function stopRecording() {
@@ -1431,6 +2027,7 @@
             thumb.style.backgroundImage = `url(${clip.thumbnail})`;
           }
           const info = document.createElement('div');
+          info.className = 'take-info';
           const title = document.createElement('div');
           title.className = 'take-title';
           title.textContent = clip.name;
@@ -1439,8 +2036,18 @@
           const startTc = secondsToSMPTE(clip.startSeconds || 0, state.settings.fps);
           const dur = placement ? placement.durationSeconds : clip.durationSeconds;
           meta.textContent = `Start ${startTc} | ${dur.toFixed(2)}s | ${clip.filename}`;
+          const actions = document.createElement('div');
+          actions.className = 'take-actions';
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'ghost take-delete';
+          deleteBtn.textContent = 'Delete';
+          deleteBtn.addEventListener('click', () => {
+            deleteClipAndPlacements(clip.id);
+          });
+          actions.appendChild(deleteBtn);
           info.appendChild(title);
           info.appendChild(meta);
+          info.appendChild(actions);
           item.appendChild(thumb);
           item.appendChild(info);
           fragment.appendChild(item);
@@ -1448,14 +2055,22 @@
         dom.takesList.appendChild(fragment);
       }
 
-      function clearTakes() {
-        if (!state.clips.length) return;
-        const ok = window.confirm('Clear all takes? This does not delete saved files.');
-        if (!ok) return;
-        state.clips = [];
-        state.placements = [];
-        state.mediaCache.clear();
+      function deleteClipAndPlacements(clipId) {
+        const clipIndex = state.clips.findIndex((clip) => clip.id === clipId);
+        if (clipIndex === -1) return;
+        state.clips.splice(clipIndex, 1);
+        state.placements = state.placements.filter((placement) => placement.clipId !== clipId);
+        if (state.timeline.selectionId) {
+          const stillExists = state.placements.some((placement) => placement.id === state.timeline.selectionId);
+          if (!stillExists) state.timeline.selectionId = null;
+        }
+        const cached = state.mediaCache.get(clipId);
+        if (cached && cached.url) URL.revokeObjectURL(cached.url);
+        state.mediaCache.delete(clipId);
+        markDirty();
         renderTakes();
+        renderTimeline();
+        renderStageView();
       }
 
       function pickPreferredMidiInput(inputs) {
@@ -1570,7 +2185,7 @@
         const tickSeconds = 60 / (state.midi.clock.bpm * 24);
         setPlayhead(state.playheadSeconds + tickSeconds);
         updateRecordingDuration();
-        if (state.armed && state.camera.stream && state.camera.stream.active) {
+        if (canAutoRecord()) {
           if (!state.recording.active && !state.recording.pending) {
             startRecording();
           }
@@ -1609,10 +2224,20 @@
         setRecordStatus(state.recording.active ? 'recording' : (state.armed ? 'armed' : 'idle'));
       }
 
+      function canAutoRecord() {
+        return Boolean(
+          state.armed &&
+          state.projectHandle &&
+          state.camera.stream &&
+          state.camera.stream.active
+        );
+      }
+
       function updateFps() {
         state.settings.fps = parseInt(dom.fpsSelect.value, 10);
         setPlayhead(state.playheadSeconds);
         renderTakes();
+        renderTimeline();
       }
 
       function setupEvents() {
@@ -1641,7 +2266,6 @@
         });
         dom.chooseFolderBtn.addEventListener('click', chooseProjectFolder);
         dom.exportPackageBtn.addEventListener('click', exportResolvePackage);
-        dom.clearTakesBtn.addEventListener('click', clearTakes);
         if (dom.copyConvertBtn) {
           dom.copyConvertBtn.addEventListener('click', async () => {
             const value = getConvertCommand();
@@ -1649,6 +2273,50 @@
             if (copied) setExportStatus('Convert command copied to clipboard.');
           });
         }
+        if (dom.toggleTimelineBtn) {
+        dom.toggleTimelineBtn.addEventListener('click', () => {
+          state.timeline.enabled = !state.timeline.enabled;
+          document.getElementById('app').classList.toggle('timeline-enabled', state.timeline.enabled);
+          dom.toggleTimelineBtn.textContent = state.timeline.enabled
+            ? 'Hide Experimental Timeline'
+            : 'Experimental Video Timeline';
+          state.timeline.lastGridBpm = getBpm();
+          if (dom.takesHeader) {
+            dom.takesHeader.textContent = state.timeline.enabled ? 'Stage' : 'Takes';
+          }
+          moveProjectBlock();
+          renderTimeline();
+          updateTimelinePlayhead();
+          renderStageView();
+        });
+      }
+        if (dom.laneSelect) {
+          dom.laneSelect.addEventListener('change', () => {
+            state.timeline.selectedLane = parseInt(dom.laneSelect.value, 10) || 0;
+          });
+        }
+        if (dom.addLaneBtn) {
+          dom.addLaneBtn.addEventListener('click', () => {
+            state.timeline.lanes += 1;
+            updateLaneSelect();
+            renderTimeline();
+          });
+        }
+        if (dom.deletePlacementBtn) {
+          dom.deletePlacementBtn.addEventListener('click', deleteSelectedPlacement);
+        }
+        if (dom.timelineViewport) {
+          dom.timelineViewport.addEventListener('mousedown', handleTimelineMouseDown);
+        }
+        window.addEventListener('mousemove', handleTimelineMouseMove);
+        window.addEventListener('mouseup', handleTimelineMouseUp);
+        window.addEventListener('keydown', (event) => {
+          if (!state.timeline.enabled) return;
+          if (event.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
+          if (event.key === 'Delete' || event.key === 'Backspace') {
+            deleteSelectedPlacement();
+          }
+        });
         dom.liveVideo.addEventListener('loadedmetadata', () => {
           dom.liveVideo.play().catch(() => {});
         });
@@ -1671,6 +2339,17 @@
         updateBpmDisplay();
         updateArmedUi();
         renderTakes();
+        updateLaneSelect();
+        document.getElementById('app').classList.toggle('timeline-enabled', state.timeline.enabled);
+        if (dom.toggleTimelineBtn) {
+          dom.toggleTimelineBtn.textContent = state.timeline.enabled
+            ? 'Hide Experimental Timeline'
+            : 'Experimental Video Timeline';
+        }
+        if (dom.takesHeader) {
+          dom.takesHeader.textContent = state.timeline.enabled ? 'Stage' : 'Takes';
+        }
+        moveProjectBlock();
         if (navigator.requestMIDIAccess) {
           setMidiStatus('ready', 'MIDI Ready');
           requestMidiAccess().then((access) => {

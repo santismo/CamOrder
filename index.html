@@ -139,11 +139,15 @@
     }
 
     #app.timeline-enabled #content {
-      grid-template-rows: auto 260px;
+      grid-template-rows: minmax(0, 1fr) 260px;
     }
 
     #app.timeline-enabled #monitor {
       max-height: 220px;
+    }
+
+    #app.timeline-enabled #monitor {
+      min-height: 180px;
     }
 
     #app.timeline-enabled #monitor {
@@ -159,6 +163,24 @@
 
     #app.timeline-enabled #controls {
       overflow: auto;
+    }
+
+    #app.timeline-enabled #controls::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    #app.timeline-enabled #controls::-webkit-scrollbar-track {
+      background: #0b1016;
+    }
+
+    #app.timeline-enabled #controls::-webkit-scrollbar-thumb {
+      background: #1f2a35;
+      border-radius: 8px;
+      border: 1px solid #0b1016;
+    }
+
+    #app.timeline-enabled #controls::-webkit-scrollbar-thumb:hover {
+      background: #2b3847;
     }
 
     #timelinePanel {
@@ -320,6 +342,7 @@
 
     #app.timeline-enabled #monitorFrame {
       margin: 6px;
+      min-height: 140px;
     }
 
     #liveVideo {
@@ -364,6 +387,34 @@
     .stage-current {
       font-size: 12px;
       font-weight: 700;
+    }
+
+    #stageVideoWrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 10px;
+      background: #0a0e13;
+      border: 1px solid #1f2a35;
+      overflow: hidden;
+    }
+
+    #stageVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: none;
+    }
+
+    #stagePlaceholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: var(--muted);
     }
 
     .stage-item {
@@ -674,6 +725,10 @@
         </div>
         <div id="takesList"></div>
         <div id="stageView">
+          <div id="stageVideoWrap">
+            <video id="stageVideo" muted playsinline></video>
+            <div id="stagePlaceholder">No clip at playhead.</div>
+          </div>
           <div id="stageCurrent" class="stage-current">Stage: None</div>
           <div id="stageList"></div>
         </div>
@@ -782,9 +837,14 @@
           drag: null,
           lastGridBpm: 0,
         },
+        stage: {
+          currentPlacementId: '',
+          updateToken: 0,
+        },
         clips: [],
         placements: [],
         mediaCache: new Map(),
+        mediaHandles: new Map(),
         playheadSeconds: 0,
         armed: true,
         projectHandle: null,
@@ -823,6 +883,8 @@
         dom.stageView = document.getElementById('stageView');
         dom.stageCurrent = document.getElementById('stageCurrent');
         dom.stageList = document.getElementById('stageList');
+        dom.stageVideo = document.getElementById('stageVideo');
+        dom.stagePlaceholder = document.getElementById('stagePlaceholder');
         dom.timelinePanel = document.getElementById('timelinePanel');
         dom.timelineViewport = document.getElementById('timelineViewport');
         dom.timelineCanvas = document.getElementById('timelineCanvas');
@@ -969,6 +1031,7 @@
           empty.className = 'stage-item';
           empty.textContent = 'No clips at playhead.';
           dom.stageList.appendChild(empty);
+          updateStageVideo(null);
           return;
         }
         enriched.forEach((item) => {
@@ -979,6 +1042,74 @@
           row.textContent = `Lane ${item.lane + 1}: ${name}`;
           dom.stageList.appendChild(row);
         });
+        updateStageVideo(top);
+      }
+
+      async function ensureClipMedia(clip) {
+        if (!clip) return '';
+        const cached = state.mediaCache.get(clip.id);
+        if (cached && cached.url) return cached.url;
+        if (!state.projectHandle || !clip.filename) return '';
+        let handle = state.mediaHandles.get(clip.filename);
+        if (!handle) {
+          const base = clip.filename.replace(/\.[^/.]+$/, '');
+          const mov = `${base}.mov`;
+          const webm = `${base}.webm`;
+          handle = state.mediaHandles.get(mov) || state.mediaHandles.get(webm) || null;
+          if (handle) clip.filename = handle.name || clip.filename;
+        }
+        if (!handle) {
+          try {
+            const mediaDir = await state.projectHandle.getDirectoryHandle('media', { create: false });
+            handle = await mediaDir.getFileHandle(clip.filename);
+            state.mediaHandles.set(clip.filename, handle);
+          } catch (error) {
+            return '';
+          }
+        }
+        const file = await handle.getFile();
+        const url = URL.createObjectURL(file);
+        state.mediaCache.set(clip.id, { blob: file, url, filename: clip.filename });
+        return url;
+      }
+
+      async function updateStageVideo(topEntry) {
+        if (!dom.stageVideo || !dom.stagePlaceholder) return;
+        if (!topEntry || !topEntry.clip) {
+          dom.stageVideo.removeAttribute('src');
+          dom.stageVideo.style.display = 'none';
+          dom.stagePlaceholder.style.display = 'flex';
+          state.stage.currentPlacementId = '';
+          return;
+        }
+        const placementId = topEntry.placement.id;
+        const seekTime = Math.max(
+          0,
+          (state.playheadSeconds - topEntry.placement.timelineStartSeconds) + topEntry.placement.clipInSeconds
+        );
+        state.stage.updateToken += 1;
+        const token = state.stage.updateToken;
+        const url = await ensureClipMedia(topEntry.clip);
+        if (token !== state.stage.updateToken) return;
+        if (!url) return;
+        if (state.stage.currentPlacementId !== placementId || dom.stageVideo.src !== url) {
+          dom.stageVideo.src = url;
+        }
+        dom.stagePlaceholder.style.display = 'none';
+        dom.stageVideo.style.display = 'block';
+        const applySeek = () => {
+          try {
+            dom.stageVideo.currentTime = seekTime;
+          } catch (error) {
+            // Ignore seek errors for unloaded media.
+          }
+        };
+        if (dom.stageVideo.readyState >= 1) {
+          applySeek();
+        } else {
+          dom.stageVideo.onloadedmetadata = applySeek;
+        }
+        state.stage.currentPlacementId = placementId;
       }
 
       function getBpm() {
@@ -1415,6 +1546,138 @@
         if (!ok) return;
         setExportStatus('Project folder selected.');
         updateFolderStatus();
+        await loadProjectFromFolder();
+      }
+
+      async function loadProjectFromFolder() {
+        if (!state.projectHandle) return;
+        state.clips = [];
+        state.placements = [];
+        state.mediaCache.clear();
+        state.mediaHandles.clear();
+        state.timeline.selectionId = null;
+        state.stage.currentPlacementId = '';
+
+        let mediaDir;
+        try {
+          mediaDir = await state.projectHandle.getDirectoryHandle('media', { create: true });
+        } catch (error) {
+          return;
+        }
+
+        try {
+          for await (const [name, handle] of mediaDir.entries()) {
+            if (handle.kind === 'file') {
+              state.mediaHandles.set(name, handle);
+            }
+          }
+        } catch (error) {
+          // Ignore enumeration errors.
+        }
+
+        let xmlText = '';
+        try {
+          const xmlHandle = await mediaDir.getFileHandle('camorder-stacked-mov.fcpxml');
+          const file = await xmlHandle.getFile();
+          xmlText = await file.text();
+        } catch (error) {
+          // Try root folder if media copy does not exist.
+        }
+
+        if (!xmlText) {
+          try {
+            const xmlHandle = await state.projectHandle.getFileHandle('camorder-stacked-mov.fcpxml');
+            const file = await xmlHandle.getFile();
+            xmlText = await file.text();
+          } catch (error) {
+            renderTakes();
+            renderTimeline();
+            renderStageView();
+            return;
+          }
+        }
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlText, 'application/xml');
+        if (doc.querySelector('parsererror')) {
+          setExportStatus('Failed to parse existing FCPXML.');
+          return;
+        }
+
+        const format = doc.querySelector('resources > format');
+        if (format) {
+          const fps = parseFrameRate(format.getAttribute('frameDuration'));
+          if (fps) {
+            const rounded = Math.round(fps);
+            state.settings.fps = rounded || state.settings.fps;
+            if (dom.fpsSelect) dom.fpsSelect.value = String(state.settings.fps);
+          }
+        }
+
+        const assetMap = new Map();
+        const assets = Array.from(doc.querySelectorAll('resources > asset'));
+        assets.forEach((asset) => {
+          const assetId = asset.getAttribute('id') || makeId('asset');
+          const name = asset.getAttribute('name') || assetId;
+          const src = asset.getAttribute('src') || '';
+          const duration = parseFcpTime(asset.getAttribute('duration'));
+          const filename = extractFilenameFromSrc(src) || `${assetId}.mov`;
+          const isWebm = filename.toLowerCase().endsWith('.webm');
+          const clipId = makeId('clip');
+          const clip = {
+            id: clipId,
+            name,
+            createdAt: new Date().toISOString(),
+            durationSeconds: duration,
+            source: isWebm ? 'recorded' : 'imported',
+            filename,
+            startSeconds: 0,
+          };
+          state.clips.push(clip);
+          assetMap.set(assetId, clip);
+        });
+
+        let maxLane = 0;
+        const placements = Array.from(doc.querySelectorAll('spine > asset-clip'));
+        placements.forEach((node) => {
+          const assetId = node.getAttribute('ref') || '';
+          const clip = assetMap.get(assetId);
+          if (!clip) return;
+          const offset = parseFcpTime(node.getAttribute('offset'));
+          const start = parseFcpTime(node.getAttribute('start'));
+          const duration = parseFcpTime(node.getAttribute('duration'));
+          const lane = parseInt(node.getAttribute('lane') || '0', 10) || 0;
+          maxLane = Math.max(maxLane, lane);
+          state.placements.push({
+            id: makeId('plc'),
+            clipId: clip.id,
+            timelineStartSeconds: offset,
+            clipInSeconds: start,
+            clipOutSeconds: start + duration,
+            durationSeconds: duration,
+            lane,
+          });
+        });
+
+        state.timeline.lanes = Math.max(state.timeline.lanes, maxLane + 1);
+        updateLaneSelect();
+        renderTakes();
+        renderTimeline();
+        renderStageView();
+
+        state.clips.forEach((clip) => {
+          ensureClipMedia(clip).then((url) => {
+            if (!url) return;
+            const cached = state.mediaCache.get(clip.id);
+            if (cached && cached.blob && !clip.thumbnail) {
+              generateThumbnail(clip, cached.blob).then((thumb) => {
+                if (!thumb) return;
+                clip.thumbnail = thumb;
+                renderTakes();
+              });
+            }
+          });
+        });
       }
 
       async function saveRecordedClipToProject(clip, blob) {
@@ -1466,7 +1729,7 @@
 
       function makeFileUrl(path, filename) {
         const base = sanitizeBasePath(path);
-        if (!base) return `media/${filename}`;
+        if (!base) return filename;
         let normalized = base;
         let prefix = 'file://';
         if (normalized.startsWith('file://')) {
@@ -1480,6 +1743,40 @@
         const combined = `${normalized}/${filename}`;
         const encoded = combined.split('/').map(encodeURIComponent).join('/');
         return `${prefix}${encoded}`;
+      }
+
+      function parseFcpTime(value) {
+        if (!value) return 0;
+        const trimmed = value.trim().replace(/s$/, '');
+        if (!trimmed) return 0;
+        if (trimmed.includes('/')) {
+          const [num, den] = trimmed.split('/').map(Number);
+          if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+            return num / den;
+          }
+        }
+        const numeric = Number(trimmed);
+        return Number.isFinite(numeric) ? numeric : 0;
+      }
+
+      function parseFrameRate(frameDuration) {
+        if (!frameDuration) return 0;
+        const trimmed = frameDuration.trim().replace(/s$/, '');
+        if (trimmed.includes('/')) {
+          const [num, den] = trimmed.split('/').map(Number);
+          if (Number.isFinite(num) && Number.isFinite(den) && num !== 0) {
+            return den / num;
+          }
+        }
+        return 0;
+      }
+
+      function extractFilenameFromSrc(src) {
+        if (!src) return '';
+        const cleaned = src.replace(/^file:\/\//, '').replace(/^file:\/\/localhost/, '');
+        const decoded = decodeURIComponent(cleaned);
+        const parts = decoded.split('/');
+        return parts[parts.length - 1] || '';
       }
 
       function getPlacementsForExport() {
@@ -1508,19 +1805,10 @@
       function buildStackedFcpXml(preferMp4 = true) {
         const fps = state.settings.fps;
         const placements = getPlacementsForExport().sort((a, b) => a.timelineStartSeconds - b.timelineStartSeconds);
-        const frame = 1 / fps;
-        const lanes = [];
-        const items = placements.map((placement) => {
-          const start = placement.timelineStartSeconds;
-          const end = placement.end;
-          let lane = 0;
-          for (; lane < lanes.length; lane += 1) {
-            if (start >= lanes[lane] - frame) break;
-          }
-          if (lane === lanes.length) lanes.push(end);
-          else lanes[lane] = Math.max(lanes[lane], end);
-          return { ...placement, lane };
-        });
+        const items = placements.map((placement) => ({
+          ...placement,
+          lane: typeof placement.lane === 'number' ? placement.lane : 0,
+        }));
 
         const usedClipIds = new Set(items.map((item) => item.clipId));
         const formatId = 'r1';

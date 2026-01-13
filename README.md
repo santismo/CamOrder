@@ -7,7 +7,7 @@
      - verify: `ffmpeg -version`
    - If `brew` is not installed yet, install Homebrew first (brew.sh), then run the command above.
 
-1) Open santismo.github.io/CamOrder in Chrome. (relies on Chrome functions)
+1) Open https://santismo.github.io/CamOrder/ in Chrome. (relies on Chrome functions) 
 2) Click **Choose Project Folder** and select your project folder.
 3) Enable MIDI + Camera, arm the recorder, and record your takes.
 4) Click **Export Resolve Package** (this writes:

@@ -265,6 +265,7 @@
       padding: 12px;
       display: grid;
       gap: 10px;
+      overflow-x: hidden;
     }
 
     .field {
@@ -292,6 +293,13 @@
       padding: 6px 10px;
       font-size: 12px;
       outline: none;
+      max-width: 100%;
+    }
+
+    .field select,
+    .field input[type="text"],
+    .field input[type="number"] {
+      width: 100%;
     }
 
     code {

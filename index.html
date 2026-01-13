@@ -43,6 +43,7 @@
       grid-template-rows: auto 1fr;
       gap: 10px;
       padding: 12px;
+      --timeline-height: 260px;
     }
 
     #topbar {
@@ -140,7 +141,7 @@
     }
 
     #app.timeline-enabled #content {
-      grid-template-rows: minmax(0, 1fr) 260px;
+      grid-template-rows: minmax(180px, 1fr) var(--timeline-height);
     }
 
     #app.timeline-enabled #monitor {
@@ -183,10 +184,33 @@
       display: none;
       grid-column: 1 / -1;
       min-height: 220px;
+      position: relative;
     }
 
     #app.timeline-enabled #timelinePanel {
       display: flex;
+    }
+
+    #timelineResizeHandle {
+      position: absolute;
+      top: 0;
+      left: 12px;
+      right: 12px;
+      height: 10px;
+      cursor: ns-resize;
+      z-index: 6;
+    }
+
+    #timelineResizeHandle::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 4px;
+      width: 120px;
+      height: 2px;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: rgba(152, 166, 179, 0.4);
     }
 
     .panel {
@@ -219,6 +243,22 @@
       letter-spacing: 1px;
       text-transform: uppercase;
       color: var(--muted);
+    }
+
+    .dawless-controls {
+      display: none;
+      border-bottom: 1px solid #25303b;
+    }
+
+    #app.dawless-enabled .dawless-controls {
+      display: grid;
+    }
+
+    .toggle-active {
+      background: var(--accent);
+      border-color: rgba(74, 211, 138, 0.55);
+      color: #0c2216;
+      font-weight: 700;
     }
 
     .panel-body {
@@ -816,11 +856,28 @@
       </aside>
 
       <section id="timelinePanel" class="panel">
+        <div id="timelineResizeHandle" aria-hidden="true"></div>
         <div class="panel-header">
-          <h3>Experimental Timeline</h3>
+          <h3>Video Timeline</h3>
           <div class="row">
+            <button id="toggleDawlessBtn" class="ghost">DAW-less Mode</button>
             <button id="addLaneBtn" class="ghost">Add Lane</button>
             <button id="deletePlacementBtn" class="ghost">Delete Clip</button>
+          </div>
+        </div>
+        <div id="dawlessControls" class="panel-body dawless-controls">
+          <div class="row">
+            <button id="dawlessPlayBtn" class="ghost">Play</button>
+            <button id="metronomeBtn" class="ghost">Metronome</button>
+            <label>Tempo
+              <input id="tempoInput" type="number" min="40" max="240" step="0.1" value="120" />
+            </label>
+          </div>
+          <div class="row">
+            <label>Audio Input
+              <select id="audioInputSelect"></select>
+            </label>
+            <button id="refreshAudioBtn" class="ghost">Refresh Audio</button>
           </div>
         </div>
         <div id="timelineBody">
@@ -836,7 +893,7 @@
     </section>
 
     <div id="experimentalBar">
-      <button id="toggleTimelineBtn" class="ghost">Experimental Video Timeline</button>
+      <button id="toggleTimelineBtn" class="ghost">Video Timeline</button>
     </div>
   </div>
 
@@ -879,6 +936,18 @@
         export: {
           mediaBasePath: '',
           statusMessage: '',
+        },
+        dawless: {
+          enabled: false,
+          tempoBpm: 120,
+          playing: false,
+          metronomeOn: false,
+          lastBeatIndex: -1,
+          lastTickMs: 0,
+          rafId: 0,
+          audioInputId: '',
+          audioStream: null,
+          audioCtx: null,
         },
         midi: {
           access: null,
@@ -959,6 +1028,7 @@
         dom.projectBlock = document.getElementById('projectBlock');
         dom.projectSlot = document.getElementById('projectSlot');
         dom.monitorProjectSlot = document.getElementById('monitorProjectSlot');
+        dom.content = document.getElementById('content');
         dom.takesList = document.getElementById('takesList');
         dom.takesHeader = document.getElementById('takesHeader');
         dom.stageView = document.getElementById('stageView');
@@ -972,7 +1042,14 @@
         dom.timelineRuler = document.getElementById('timelineRuler');
         dom.timelineLanes = document.getElementById('timelineLanes');
         dom.timelinePlayhead = document.getElementById('timelinePlayhead');
+        dom.timelineResizeHandle = document.getElementById('timelineResizeHandle');
         dom.laneSelect = document.getElementById('laneSelect');
+        dom.toggleDawlessBtn = document.getElementById('toggleDawlessBtn');
+        dom.dawlessPlayBtn = document.getElementById('dawlessPlayBtn');
+        dom.metronomeBtn = document.getElementById('metronomeBtn');
+        dom.tempoInput = document.getElementById('tempoInput');
+        dom.audioInputSelect = document.getElementById('audioInputSelect');
+        dom.refreshAudioBtn = document.getElementById('refreshAudioBtn');
         dom.addLaneBtn = document.getElementById('addLaneBtn');
         dom.deletePlacementBtn = document.getElementById('deletePlacementBtn');
         dom.toggleTimelineBtn = document.getElementById('toggleTimelineBtn');
@@ -989,6 +1066,10 @@
       function formatClockTime(date = new Date()) {
         const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
         return time.replace('AM', 'am').replace('PM', 'pm');
+      }
+
+      function isTransportPlaying() {
+        return state.dawless.enabled ? state.dawless.playing : state.midi.clock.playing;
       }
 
       function setPlayhead(seconds) {
@@ -1094,9 +1175,8 @@
 
       function moveProjectBlock() {
         if (!dom.projectBlock || !dom.projectSlot || !dom.monitorProjectSlot) return;
-        const target = state.timeline.enabled ? dom.monitorProjectSlot : dom.projectSlot;
-        if (dom.projectBlock.parentElement !== target) {
-          target.appendChild(dom.projectBlock);
+        if (dom.projectBlock.parentElement !== dom.projectSlot) {
+          dom.projectSlot.appendChild(dom.projectBlock);
         }
       }
 
@@ -1206,14 +1286,14 @@
         dom.stageVideo.style.display = 'block';
         const applySeek = () => {
           const drift = Math.abs((dom.stageVideo.currentTime || 0) - seekTime);
-          if (!state.midi.clock.playing || clipChanged || drift > 0.08) {
+          if (!state.midi.clock.playing || clipChanged || drift > 0.2) {
             try {
               dom.stageVideo.currentTime = seekTime;
             } catch (error) {
               // Ignore seek errors for unloaded media.
             }
           }
-          if (state.midi.clock.playing) {
+          if (isTransportPlaying()) {
             dom.stageVideo.play().catch(() => {});
           } else {
             dom.stageVideo.pause();
@@ -1228,6 +1308,9 @@
       }
 
       function getBpm() {
+        if (state.dawless.enabled) {
+          return Math.max(20, state.dawless.tempoBpm || 120);
+        }
         return Math.max(20, state.midi.clock.bpm || 120);
       }
 
@@ -1238,13 +1321,217 @@
       function snapToBeatGrid(seconds) {
         const grid = getSecondsPerBeat() / state.timeline.subdivisions;
         if (!grid) return seconds;
-        return Math.max(0, Math.round(seconds / grid) * grid);
+        const snapped = Math.round(seconds / grid) * grid;
+        return Math.max(0, Number(snapped.toFixed(6)));
+      }
+
+      function snapToBeatGridCeil(seconds) {
+        const grid = getSecondsPerBeat() / state.timeline.subdivisions;
+        if (!grid) return seconds;
+        const snapped = Math.ceil(seconds / grid) * grid;
+        return Math.max(0, Number(snapped.toFixed(6)));
       }
 
       function getLaneHeaderWidth() {
         return 120;
       }
 
+      async function refreshAudioInputs(allowPrompt = false) {
+        if (!dom.audioInputSelect) return;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+          dom.audioInputSelect.innerHTML = '<option value="">Audio unavailable</option>';
+          return;
+        }
+        try {
+          let devices = await navigator.mediaDevices.enumerateDevices();
+          let inputs = devices.filter((device) => device.kind === 'audioinput');
+          const hasLabels = inputs.some((input) => input.label);
+          if (!hasLabels && allowPrompt) {
+            try {
+              const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+              probe.getTracks().forEach((track) => track.stop());
+              devices = await navigator.mediaDevices.enumerateDevices();
+              inputs = devices.filter((device) => device.kind === 'audioinput');
+            } catch (error) {
+              // Ignore permission denial; we'll fall back to generic names.
+            }
+          }
+          dom.audioInputSelect.innerHTML = '';
+          if (!inputs.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No audio inputs';
+            dom.audioInputSelect.appendChild(opt);
+            return;
+          }
+          inputs.forEach((input, index) => {
+            const opt = document.createElement('option');
+            opt.value = input.deviceId;
+            opt.textContent = input.label || `Audio Input ${index + 1}`;
+            dom.audioInputSelect.appendChild(opt);
+          });
+          const preferred = state.dawless.audioInputId;
+          if (preferred && inputs.some((input) => input.deviceId === preferred)) {
+            dom.audioInputSelect.value = preferred;
+          } else {
+            dom.audioInputSelect.value = inputs[0].deviceId;
+            state.dawless.audioInputId = inputs[0].deviceId;
+          }
+        } catch (error) {
+          dom.audioInputSelect.innerHTML = '<option value="">Audio list blocked</option>';
+        }
+      }
+
+      async function getAudioStream() {
+        if (!state.dawless.enabled) return null;
+        const desiredId = state.dawless.audioInputId;
+        if (state.dawless.audioStream) {
+          const track = state.dawless.audioStream.getAudioTracks()[0];
+          const currentId = track ? track.getSettings().deviceId : '';
+          if (!desiredId || currentId === desiredId) {
+            return state.dawless.audioStream;
+          }
+          state.dawless.audioStream.getTracks().forEach((t) => t.stop());
+        }
+        try {
+          const constraints = desiredId
+            ? { audio: { deviceId: { exact: desiredId } } }
+            : { audio: true };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
+          state.dawless.audioStream = stream;
+          return stream;
+        } catch (error) {
+          alert(`Unable to access audio input: ${error.message}`);
+          return null;
+        }
+      }
+
+      function stopAudioStream() {
+        if (state.dawless.audioStream) {
+          state.dawless.audioStream.getTracks().forEach((track) => track.stop());
+          state.dawless.audioStream = null;
+        }
+      }
+
+      async function getRecordingStream() {
+        const videoStream = await getCameraStream();
+        if (!videoStream) return null;
+        if (!state.dawless.enabled) return videoStream;
+        const audioStream = await getAudioStream();
+        const tracks = [...videoStream.getVideoTracks()];
+        if (audioStream) {
+          tracks.push(...audioStream.getAudioTracks());
+        }
+        return new MediaStream(tracks);
+      }
+
+      function playMetronomeClick(strong) {
+        if (!state.dawless.metronomeOn) return;
+        if (!state.dawless.audioCtx) {
+          state.dawless.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = state.dawless.audioCtx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = strong ? 880 : 660;
+        gain.gain.value = 0.0001;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+        gain.gain.exponentialRampToValueAtTime(strong ? 0.2 : 0.12, now + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+        osc.start(now);
+        osc.stop(now + 0.09);
+      }
+
+      function dawlessTick(now) {
+        if (!state.dawless.playing) return;
+        if (!state.dawless.lastTickMs) state.dawless.lastTickMs = now;
+        const delta = Math.max(0, (now - state.dawless.lastTickMs) / 1000);
+        state.dawless.lastTickMs = now;
+        const next = state.playheadSeconds + delta;
+        setPlayhead(next);
+        if (state.recording.active) {
+          updateRecordingDuration();
+        }
+        if (state.dawless.metronomeOn) {
+          const beatIndex = Math.floor(state.playheadSeconds / getSecondsPerBeat());
+          if (beatIndex !== state.dawless.lastBeatIndex) {
+            state.dawless.lastBeatIndex = beatIndex;
+            const strong = beatIndex % state.timeline.beatsPerBar === 0;
+            playMetronomeClick(strong);
+          }
+        }
+        if (canAutoRecord()) {
+          if (!state.recording.active && !state.recording.pending) {
+            startRecording();
+          }
+        }
+        state.dawless.rafId = requestAnimationFrame(dawlessTick);
+      }
+
+      function startDawlessTransport() {
+        if (state.dawless.playing) return;
+        state.dawless.playing = true;
+        state.dawless.lastTickMs = 0;
+        state.dawless.lastBeatIndex = -1;
+        dom.dawlessPlayBtn?.classList.add('toggle-active');
+        dom.dawlessPlayBtn.textContent = 'Stop';
+        state.dawless.rafId = requestAnimationFrame(dawlessTick);
+      }
+
+      function stopDawlessTransport() {
+        state.dawless.playing = false;
+        state.dawless.lastTickMs = 0;
+        state.dawless.lastBeatIndex = -1;
+        if (state.dawless.rafId) {
+          cancelAnimationFrame(state.dawless.rafId);
+          state.dawless.rafId = 0;
+        }
+        dom.dawlessPlayBtn?.classList.remove('toggle-active');
+        if (dom.dawlessPlayBtn) dom.dawlessPlayBtn.textContent = 'Play';
+        if (state.recording.active) stopRecording();
+      }
+
+      function setDawlessEnabled(enabled) {
+        state.dawless.enabled = enabled;
+        document.getElementById('app').classList.toggle('dawless-enabled', enabled);
+        if (dom.toggleDawlessBtn) {
+          dom.toggleDawlessBtn.classList.toggle('toggle-active', enabled);
+          dom.toggleDawlessBtn.textContent = enabled ? 'DAW-less: On' : 'DAW-less Mode';
+        }
+        if (dom.metronomeBtn) {
+          dom.metronomeBtn.classList.toggle('toggle-active', state.dawless.metronomeOn);
+        }
+        if (dom.dawlessPlayBtn) dom.dawlessPlayBtn.disabled = !enabled;
+        if (dom.metronomeBtn) dom.metronomeBtn.disabled = !enabled;
+        if (dom.tempoInput) dom.tempoInput.disabled = !enabled;
+        if (dom.audioInputSelect) dom.audioInputSelect.disabled = !enabled;
+        if (dom.refreshAudioBtn) dom.refreshAudioBtn.disabled = !enabled;
+        if (dom.tempoInput) dom.tempoInput.value = String(state.dawless.tempoBpm);
+        if (dom.stageVideo) dom.stageVideo.muted = !enabled;
+        if (!enabled) {
+          stopDawlessTransport();
+          stopAudioStream();
+        } else {
+          refreshAudioInputs(true);
+        }
+        updateBpmDisplay();
+        renderTimeline();
+      }
+
+      function clampTimelineHeight(value) {
+        const contentHeight = dom.content ? dom.content.clientHeight : 0;
+        const minHeight = 180;
+        const maxHeight = Math.max(minHeight, contentHeight - 180);
+        return clamp(value, minHeight, maxHeight);
+      }
+
+      function setTimelineHeight(px) {
+        const clamped = clampTimelineHeight(px);
+        document.getElementById('app').style.setProperty('--timeline-height', `${clamped}px`);
+      }
       function timeToPx(seconds) {
         return (seconds / getSecondsPerBeat()) * state.timeline.pxPerBeat;
       }
@@ -1410,10 +1697,15 @@
       function deleteSelectedPlacement() {
         const selection = state.timeline.selectionId;
         if (!selection) return;
+        const target = getPlacementById(selection);
         state.placements = state.placements.filter((placement) => placement.id !== selection);
         state.timeline.selectionId = null;
+        if (target) {
+          maybeDeleteClipMedia(target.clipId);
+        }
         markDirty();
         renderTimeline();
+        updateProjectFcpxml();
       }
 
       function handleTimelineMouseDown(event) {
@@ -1528,9 +1820,9 @@
       }
 
       function updateBpmDisplay() {
-        dom.bpmDisplay.textContent = `${state.midi.clock.bpm.toFixed(1)} BPM`;
-        if (!state.timeline.enabled) return;
         const bpm = getBpm();
+        dom.bpmDisplay.textContent = `${bpm.toFixed(1)} BPM`;
+        if (!state.timeline.enabled) return;
         if (Math.abs(bpm - state.timeline.lastGridBpm) >= 0.2) {
           state.timeline.lastGridBpm = bpm;
           renderTimeline();
@@ -1776,6 +2068,7 @@
           const lower = filename.toLowerCase();
           const isWebm = lower.endsWith('.webm');
           const recordedByName = /^clip-[a-z0-9]+\.(webm|mov)$/.test(lower);
+          const hasAudio = asset.getAttribute('hasAudio') === '1';
           const clipId = makeId('clip');
           const clip = {
             id: clipId,
@@ -1783,6 +2076,7 @@
             createdAt: new Date().toISOString(),
             durationSeconds: duration,
             source: (recordedByName || isWebm) ? 'recorded' : 'imported',
+            hasAudio,
             filename,
             startSeconds: 0,
           };
@@ -1855,6 +2149,51 @@
         link.click();
         link.remove();
         URL.revokeObjectURL(url);
+      }
+
+      async function updateProjectFcpxml() {
+        if (!state.projectHandle) return;
+        const xml = buildStackedFcpXml(true);
+        await writeMediaFile('camorder-stacked-mov.fcpxml', xml, 'application/xml');
+      }
+
+      async function deleteClipMediaFiles(clipId) {
+        const clip = getClipById(clipId);
+        if (!clip || clip.source !== 'recorded' || !state.projectHandle) return;
+        if (state.clips.some((item) => item.id !== clipId && item.filename === clip.filename)) return;
+        const ok = await ensurePermission(state.projectHandle);
+        if (!ok) return;
+        const mediaDir = await state.projectHandle.getDirectoryHandle('media', { create: true });
+        const filenames = new Set();
+        if (clip.filename) filenames.add(clip.filename);
+        if (clip.filename) {
+          const base = clip.filename.replace(/\.[^/.]+$/, '');
+          filenames.add(`${base}.webm`);
+          filenames.add(`${base}.mov`);
+        }
+        for (const name of filenames) {
+          try {
+            await mediaDir.removeEntry(name);
+            state.mediaHandles.delete(name);
+          } catch (error) {
+            if (error && error.name !== 'NotFoundError') {
+              console.warn('Failed to remove media file', name, error);
+            }
+          }
+        }
+      }
+
+      function maybeDeleteClipMedia(clipId) {
+        const remaining = state.placements.filter((placement) => placement.clipId === clipId);
+        if (remaining.length === 0) {
+          deleteClipMediaFiles(clipId);
+          const clipIndex = state.clips.findIndex((clip) => clip.id === clipId);
+          if (clipIndex !== -1) {
+            state.clips.splice(clipIndex, 1);
+          }
+          state.mediaCache.delete(clipId);
+          renderTakes();
+        }
       }
 
       function sanitizeReelName(name) {
@@ -1978,9 +2317,10 @@
           const filename = resolveClipFilename(clip, preferMp4);
           const src = makeFileUrl(state.export.mediaBasePath, filename);
           const duration = secondsToFcpDuration(Math.max(clip.durationSeconds, 0), fps);
+          const audioFlag = clip.hasAudio ? '1' : '0';
           const safeName = (clip.name || clip.id).replace(/\"/g, '');
           assetLines.push(
-            `    <asset id=\"${assetId}\" name=\"${safeName}\" src=\"${src}\" start=\"0s\" duration=\"${duration}\" hasVideo=\"1\" hasAudio=\"0\" format=\"${formatId}\"/>`
+            `    <asset id=\"${assetId}\" name=\"${safeName}\" src=\"${src}\" start=\"0s\" duration=\"${duration}\" hasVideo=\"1\" hasAudio=\"${audioFlag}\" format=\"${formatId}\"/>`
           );
           clip.__assetId = assetId;
         });
@@ -2054,9 +2394,10 @@
           const filename = resolveClipFilename(clip, preferMp4);
           const src = makeFileUrl(state.export.mediaBasePath, filename);
           const duration = secondsToFcpDuration(Math.max(clip.durationSeconds, 0), fps);
+          const audioFlag = clip.hasAudio ? '1' : '0';
           const safeName = (clip.name || clip.id).replace(/\"/g, '');
           assetLines.push(
-            `    <asset id=\"${assetId}\" name=\"${safeName}\" src=\"${src}\" start=\"0s\" duration=\"${duration}\" hasVideo=\"1\" hasAudio=\"0\" format=\"${formatId}\"/>`
+            `    <asset id=\"${assetId}\" name=\"${safeName}\" src=\"${src}\" start=\"0s\" duration=\"${duration}\" hasVideo=\"1\" hasAudio=\"${audioFlag}\" format=\"${formatId}\"/>`
           );
           clip.__assetId = assetId;
         });
@@ -2181,7 +2522,7 @@
           'for f in media/*.webm; do',
           '  [ -e "$f" ] || continue',
           '  base=$(basename "$f" .webm)',
-          '  ffmpeg -y -i "$f" -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -an "media/${base}.mov"',
+          '  ffmpeg -y -i "$f" -map 0:v -map 0:a? -c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le -c:a pcm_s16le "media/${base}.mov"',
           '  rm -f "$f"',
           'done',
         ].join('\n');
@@ -2313,33 +2654,33 @@
         if (!state.armed) return;
 
         state.recording.pending = true;
-        const stream = await getCameraStream();
+        const stream = await getRecordingStream();
         if (!stream) {
           state.recording.pending = false;
           return;
         }
 
-        const rawStart = state.timeline.enabled
-          ? snapToBeatGrid(state.playheadSeconds)
-          : state.playheadSeconds;
+        const rawStart = state.playheadSeconds;
         const recordStart = state.timeline.enabled
-          ? Math.max(0, rawStart)
+          ? snapToBeatGridCeil(rawStart)
           : Math.max(0, snapSeconds(rawStart, state.settings.fps));
-        if (Math.abs(recordStart - state.playheadSeconds) > 0.0001) {
-          setPlayhead(recordStart);
-        }
+        const clipInSeconds = state.timeline.enabled
+          ? Math.max(0, recordStart - rawStart)
+          : 0;
         const mimeType = getSupportedMimeType();
         const extension = 'webm';
         const clipId = makeId('clip');
         const clipName = `Take ${pad(state.clips.length + 1, 3)} ${secondsToSMPTE(recordStart, state.settings.fps)}`;
+        const hasAudio = stream.getAudioTracks().length > 0;
         const clip = {
           id: clipId,
           name: clipName,
           createdAt: new Date().toISOString(),
           durationSeconds: 0,
           source: 'recorded',
+          hasAudio,
           filename: `${clipId}.${extension}`,
-          startSeconds: recordStart,
+          startSeconds: rawStart,
         };
         state.clips.push(clip);
 
@@ -2347,8 +2688,8 @@
           id: makeId('plc'),
           clipId,
           timelineStartSeconds: recordStart,
-          clipInSeconds: 0,
-          clipOutSeconds: 0,
+          clipInSeconds,
+          clipOutSeconds: clipInSeconds,
           durationSeconds: 0,
           lane: state.timeline.selectedLane || 0,
         };
@@ -2368,7 +2709,7 @@
           active: true,
           pending: false,
           clipId,
-          startPlayhead: recordStart,
+          startPlayhead: rawStart,
           recorder,
           chunks,
         };
@@ -2379,16 +2720,18 @@
       function updateRecordingDuration() {
         if (!state.recording.active) return;
         const rawDuration = Math.max(0, state.playheadSeconds - state.recording.startPlayhead);
-        const duration = state.timeline.enabled
-          ? snapToBeatGrid(rawDuration)
-          : snapSeconds(rawDuration, state.settings.fps);
         const placement = state.placements.find((item) => item.clipId === state.recording.clipId);
+        const usableDuration = placement
+          ? Math.max(0, rawDuration - placement.clipInSeconds)
+          : rawDuration;
+        const snappedDuration = state.timeline.enabled
+          ? Math.min(usableDuration, snapToBeatGrid(usableDuration))
+          : snapSeconds(usableDuration, state.settings.fps);
         if (placement) {
-          placement.durationSeconds = duration;
-          placement.clipOutSeconds = placement.clipInSeconds + duration;
+          placement.durationSeconds = snappedDuration;
+          placement.clipOutSeconds = placement.clipInSeconds + snappedDuration;
         }
         updateTimelineRecordingClip();
-        renderStageView();
       }
 
       function generateThumbnail(clip, blob) {
@@ -2437,14 +2780,17 @@
         if (!clip) return;
         const blob = new Blob(recording.chunks, { type: recording.mimeType || 'video/webm' });
         const rawDuration = Math.max(0, state.playheadSeconds - clip.startSeconds);
-        const snappedDuration = state.timeline.enabled
-          ? snapToBeatGrid(rawDuration)
-          : snapSeconds(rawDuration, state.settings.fps);
-        clip.durationSeconds = snappedDuration;
         const placement = state.placements.find((item) => item.clipId === clip.id);
+        const usableDuration = placement
+          ? Math.max(0, rawDuration - placement.clipInSeconds)
+          : rawDuration;
+        const snappedDuration = state.timeline.enabled
+          ? Math.min(usableDuration, snapToBeatGrid(usableDuration))
+          : snapSeconds(usableDuration, state.settings.fps);
+        clip.durationSeconds = rawDuration;
         if (placement) {
-          placement.durationSeconds = clip.durationSeconds;
-          placement.clipOutSeconds = placement.clipInSeconds + clip.durationSeconds;
+          placement.durationSeconds = snappedDuration;
+          placement.clipOutSeconds = placement.clipInSeconds + placement.durationSeconds;
         }
         const url = URL.createObjectURL(blob);
         state.mediaCache.set(clip.id, { blob, url, filename: clip.filename });
@@ -2453,7 +2799,7 @@
             console.warn('Failed to save clip to project folder', error);
           });
         }
-        if (!state.camera.stream || recording.stream !== state.camera.stream) {
+        if (!state.dawless.enabled && (!state.camera.stream || recording.stream !== state.camera.stream)) {
           recording.stream.getTracks().forEach((track) => track.stop());
         }
         state.recording = { active: false, pending: false, clipId: null, startPlayhead: 0, recorder: null, chunks: [] };
@@ -2538,10 +2884,12 @@
         const cached = state.mediaCache.get(clipId);
         if (cached && cached.url) URL.revokeObjectURL(cached.url);
         state.mediaCache.delete(clipId);
+        deleteClipMediaFiles(clipId);
         markDirty();
         renderTakes();
         renderTimeline();
         renderStageView();
+        updateProjectFcpxml();
       }
 
       function pickPreferredMidiInput(inputs) {
@@ -2664,6 +3012,7 @@
       }
 
       function handleMidiMessage(event) {
+        if (state.dawless.enabled) return;
         const data = event.data;
         const status = data[0];
         if (status === 0xF8) {
@@ -2700,7 +3049,8 @@
           state.armed &&
           state.projectHandle &&
           state.camera.stream &&
-          state.camera.stream.active
+          state.camera.stream.active &&
+          isTransportPlaying()
         );
       }
 
@@ -2744,13 +3094,60 @@
             if (copied) setExportStatus('Convert command copied to clipboard.');
           });
         }
+        if (dom.toggleDawlessBtn) {
+          dom.toggleDawlessBtn.addEventListener('click', () => {
+            setDawlessEnabled(!state.dawless.enabled);
+          });
+        }
+        if (dom.dawlessPlayBtn) {
+          dom.dawlessPlayBtn.addEventListener('click', () => {
+            if (!state.dawless.enabled) return;
+            if (state.dawless.playing) {
+              stopDawlessTransport();
+            } else {
+              startDawlessTransport();
+            }
+          });
+        }
+        if (dom.metronomeBtn) {
+          dom.metronomeBtn.addEventListener('click', () => {
+            if (!state.dawless.enabled) return;
+            state.dawless.metronomeOn = !state.dawless.metronomeOn;
+            dom.metronomeBtn.classList.toggle('toggle-active', state.dawless.metronomeOn);
+          });
+        }
+        if (dom.tempoInput) {
+          dom.tempoInput.addEventListener('change', () => {
+            const next = parseFloat(dom.tempoInput.value);
+            if (!Number.isFinite(next)) return;
+            state.dawless.tempoBpm = Math.min(240, Math.max(40, next));
+            dom.tempoInput.value = String(state.dawless.tempoBpm);
+            updateBpmDisplay();
+            renderTimeline();
+          });
+        }
+        if (dom.audioInputSelect) {
+          dom.audioInputSelect.addEventListener('change', () => {
+            state.dawless.audioInputId = dom.audioInputSelect.value;
+            stopAudioStream();
+          });
+        }
+        if (dom.refreshAudioBtn) {
+          dom.refreshAudioBtn.addEventListener('click', () => refreshAudioInputs(true));
+        }
         if (dom.toggleTimelineBtn) {
         dom.toggleTimelineBtn.addEventListener('click', () => {
           state.timeline.enabled = !state.timeline.enabled;
           document.getElementById('app').classList.toggle('timeline-enabled', state.timeline.enabled);
+          if (!state.timeline.enabled && state.dawless.enabled) {
+            setDawlessEnabled(false);
+          }
+          if (state.timeline.enabled) {
+            setTimelineHeight(parseInt(getComputedStyle(document.getElementById('app')).getPropertyValue('--timeline-height'), 10) || 260);
+          }
           dom.toggleTimelineBtn.textContent = state.timeline.enabled
-            ? 'Hide Experimental Timeline'
-            : 'Experimental Video Timeline';
+            ? 'Hide Video Timeline'
+            : 'Video Timeline';
           state.timeline.lastGridBpm = getBpm();
           if (dom.takesHeader) {
             dom.takesHeader.textContent = state.timeline.enabled ? 'Stage' : 'Takes';
@@ -2761,6 +3158,24 @@
           renderStageView();
         });
       }
+        if (dom.timelineResizeHandle) {
+          dom.timelineResizeHandle.addEventListener('mousedown', (event) => {
+            if (!state.timeline.enabled) return;
+            event.preventDefault();
+            const startY = event.clientY;
+            const current = parseInt(getComputedStyle(document.getElementById('app')).getPropertyValue('--timeline-height'), 10) || 260;
+            const onMove = (moveEvent) => {
+              const delta = moveEvent.clientY - startY;
+              setTimelineHeight(current - delta);
+            };
+            const onUp = () => {
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          });
+        }
         if (dom.laneSelect) {
           dom.laneSelect.addEventListener('change', () => {
             state.timeline.selectedLane = parseInt(dom.laneSelect.value, 10) || 0;
@@ -2804,18 +3219,23 @@
         setupEvents();
         populateResolutionOptions();
         refreshDevices();
+        refreshAudioInputs();
+        if (dom.tempoInput) dom.tempoInput.value = String(state.dawless.tempoBpm);
+        if (dom.stageVideo) dom.stageVideo.muted = !state.dawless.enabled;
         setCameraStatus('off');
         updateExportNotes();
         updateFolderStatus();
         updateBpmDisplay();
         updateArmedUi();
+        setDawlessEnabled(state.dawless.enabled);
+        setTimelineHeight(260);
         renderTakes();
         updateLaneSelect();
         document.getElementById('app').classList.toggle('timeline-enabled', state.timeline.enabled);
         if (dom.toggleTimelineBtn) {
           dom.toggleTimelineBtn.textContent = state.timeline.enabled
-            ? 'Hide Experimental Timeline'
-            : 'Experimental Video Timeline';
+            ? 'Hide Video Timeline'
+            : 'Video Timeline';
         }
         if (dom.takesHeader) {
           dom.takesHeader.textContent = state.timeline.enabled ? 'Stage' : 'Takes';

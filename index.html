@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CamOrder Recorder</title>
+  <title>CamOrder</title>
   <style>
     :root {
       --bg-0: #0e1217;
@@ -11,6 +11,7 @@
       --panel: #1b222b;
       --panel-hi: #222c37;
       --panel-edge: #2c3744;
+      --lane-header-width: 120px;
       --text: #e6ecf3;
       --muted: #98a6b3;
       --accent: #4ad38a;
@@ -143,11 +144,7 @@
     }
 
     #app.timeline-enabled #monitor {
-      max-height: 220px;
-    }
-
-    #app.timeline-enabled #monitor {
-      min-height: 180px;
+      min-height: 260px;
     }
 
     #app.timeline-enabled #monitor {
@@ -201,6 +198,11 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
+    }
+
+    .project-block {
+      box-shadow: 0 6px 14px var(--shadow);
+      width: 100%;
     }
 
     .panel-header {
@@ -333,7 +335,7 @@
       margin: 10px;
       border-radius: 12px;
       background: #06080b;
-      flex: 1;
+      flex: 1 1 auto;
       overflow: hidden;
       display: flex;
       align-items: center;
@@ -341,7 +343,7 @@
     }
 
     #app.timeline-enabled #monitorFrame {
-      margin: 6px;
+      margin: 6px 6px 0;
       min-height: 140px;
     }
 
@@ -415,6 +417,10 @@
       justify-content: center;
       font-size: 12px;
       color: var(--muted);
+    }
+
+    #stageList {
+      display: none;
     }
 
     .stage-item {
@@ -516,7 +522,14 @@
     }
 
     #monitorProjectSlot {
-      padding: 0 10px 10px;
+      padding: 6px 10px 10px;
+      display: grid;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+
+    #monitor {
+      gap: 8px;
     }
 
     #timelineCanvas {
@@ -531,6 +544,7 @@
       border-bottom: 1px solid #1f2a35;
       background: rgba(12, 16, 22, 0.9);
       z-index: 2;
+      box-sizing: border-box;
     }
 
     .ruler-label {
@@ -552,6 +566,44 @@
       border-bottom: 1px solid #1b2430;
     }
 
+    .lane-header {
+      position: sticky;
+      left: 0;
+      top: 0;
+      height: 100%;
+      width: var(--lane-header-width);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 0 10px;
+      background: #121820;
+      border-right: 1px solid #1f2a35;
+      z-index: 4;
+    }
+
+    .lane-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .lane-arm {
+      width: 26px;
+      height: 24px;
+      padding: 0;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .lane-arm.armed {
+      background: var(--danger);
+      border-color: #ff7a7a;
+      color: #2b0b0b;
+    }
+
     .timeline-clip {
       position: absolute;
       top: 7px;
@@ -567,6 +619,10 @@
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
+    }
+
+    .timeline-clip.locked {
+      cursor: default;
     }
 
     .timeline-clip.selected {
@@ -632,7 +688,7 @@
   <div id="app">
     <header id="topbar">
       <div id="brand">
-        <h1>CamOrder Recorder</h1>
+        <h1>CamOrder</h1>
         <span>MIDI clock synced video capture for DAWs</span>
       </div>
       <div id="statusRow">
@@ -688,7 +744,7 @@
         </div>
 
         <div id="projectSlot">
-          <div id="projectBlock">
+          <div id="projectBlock" class="panel project-block">
             <div class="panel-header"><h3>Project</h3></div>
             <div class="panel-body">
               <div class="row">
@@ -738,9 +794,6 @@
         <div class="panel-header">
           <h3>Experimental Timeline</h3>
           <div class="row">
-            <label>Record Lane
-              <select id="laneSelect"></select>
-            </label>
             <button id="addLaneBtn" class="ghost">Add Lane</button>
             <button id="deletePlacementBtn" class="ghost">Delete Clip</button>
           </div>
@@ -1009,7 +1062,7 @@
       }
 
       function renderStageView() {
-        if (!dom.stageCurrent || !dom.stageList) return;
+        if (!dom.stageCurrent) return;
         if (!state.timeline.enabled) return;
         const active = getActivePlacementsAtPlayhead();
         const enriched = active.map((placement) => {
@@ -1025,23 +1078,25 @@
         dom.stageCurrent.textContent = top && top.clip
           ? `Stage: ${top.clip.name}`
           : 'Stage: None';
-        dom.stageList.innerHTML = '';
-        if (!enriched.length) {
-          const empty = document.createElement('div');
-          empty.className = 'stage-item';
-          empty.textContent = 'No clips at playhead.';
-          dom.stageList.appendChild(empty);
+        if (dom.stageList) {
+          dom.stageList.innerHTML = '';
+        }
+        if (!top || !top.clip) {
+          if (dom.stageList) {
+            const empty = document.createElement('div');
+            empty.className = 'stage-item';
+            empty.textContent = 'No clips at playhead.';
+            dom.stageList.appendChild(empty);
+          }
           updateStageVideo(null);
           return;
         }
-        enriched.forEach((item) => {
+        if (dom.stageList) {
           const row = document.createElement('div');
-          row.className = 'stage-item';
-          if (top && item === top) row.classList.add('top');
-          const name = item.clip ? item.clip.name : item.placement.clipId;
-          row.textContent = `Lane ${item.lane + 1}: ${name}`;
+          row.className = 'stage-item top';
+          row.textContent = `Lane ${top.lane + 1}: ${top.clip.name}`;
           dom.stageList.appendChild(row);
-        });
+        }
         updateStageVideo(top);
       }
 
@@ -1077,6 +1132,7 @@
         if (!dom.stageVideo || !dom.stagePlaceholder) return;
         if (!topEntry || !topEntry.clip) {
           dom.stageVideo.removeAttribute('src');
+          dom.stageVideo.load();
           dom.stageVideo.style.display = 'none';
           dom.stagePlaceholder.style.display = 'flex';
           state.stage.currentPlacementId = '';
@@ -1094,6 +1150,7 @@
         if (!url) return;
         if (state.stage.currentPlacementId !== placementId || dom.stageVideo.src !== url) {
           dom.stageVideo.src = url;
+          dom.stageVideo.load();
         }
         dom.stagePlaceholder.style.display = 'none';
         dom.stageVideo.style.display = 'block';
@@ -1102,6 +1159,11 @@
             dom.stageVideo.currentTime = seekTime;
           } catch (error) {
             // Ignore seek errors for unloaded media.
+          }
+          if (state.midi.clock.playing) {
+            dom.stageVideo.play().catch(() => {});
+          } else {
+            dom.stageVideo.pause();
           }
         };
         if (dom.stageVideo.readyState >= 1) {
@@ -1126,6 +1188,10 @@
         return Math.max(0, Math.round(seconds / grid) * grid);
       }
 
+      function getLaneHeaderWidth() {
+        return 120;
+      }
+
       function timeToPx(seconds) {
         return (seconds / getSecondsPerBeat()) * state.timeline.pxPerBeat;
       }
@@ -1135,10 +1201,10 @@
       }
 
       function updateLaneSelect() {
-        if (!dom.laneSelect) return;
         if (state.timeline.selectedLane >= state.timeline.lanes) {
           state.timeline.selectedLane = Math.max(0, state.timeline.lanes - 1);
         }
+        if (!dom.laneSelect) return;
         dom.laneSelect.innerHTML = '';
         for (let i = 0; i < state.timeline.lanes; i += 1) {
           const opt = document.createElement('option');
@@ -1160,13 +1226,15 @@
         const beatPx = state.timeline.pxPerBeat;
         const subPx = beatPx / state.timeline.subdivisions;
         const barPx = beatPx * state.timeline.beatsPerBar;
+        const headerWidth = getLaneHeaderWidth();
         dom.timelineCanvas.style.backgroundImage = [
           'linear-gradient(to right, rgba(42, 53, 65, 0.55) 1px, transparent 1px)',
           'linear-gradient(to right, rgba(28, 37, 47, 0.5) 1px, transparent 1px)',
           'linear-gradient(to right, rgba(22, 28, 36, 0.35) 1px, transparent 1px)',
         ].join(', ');
         dom.timelineCanvas.style.backgroundSize = `${barPx}px 100%, ${beatPx}px 100%, ${subPx}px 100%`;
-        dom.timelineCanvas.style.width = `${Math.max(widthPx, dom.timelineViewport.clientWidth)}px`;
+        dom.timelineCanvas.style.backgroundPosition = `${headerWidth}px 0, ${headerWidth}px 0, ${headerWidth}px 0`;
+        dom.timelineCanvas.style.width = `${Math.max(widthPx + headerWidth, dom.timelineViewport.clientWidth)}px`;
       }
 
       function renderTimelineRuler(spanSeconds) {
@@ -1174,14 +1242,15 @@
         dom.timelineRuler.innerHTML = '';
         const beats = Math.ceil(spanSeconds / getSecondsPerBeat());
         const totalBars = Math.max(1, Math.ceil(beats / state.timeline.beatsPerBar));
+        const headerWidth = getLaneHeaderWidth();
         for (let bar = 0; bar <= totalBars; bar += 1) {
           const beat = bar * state.timeline.beatsPerBar;
           const seconds = beat * getSecondsPerBeat();
-          const left = timeToPx(seconds);
+          const left = timeToPx(seconds) + headerWidth;
           const label = document.createElement('div');
           label.className = 'ruler-label';
           label.style.left = `${left}px`;
-          label.textContent = `Bar ${bar + 1}`;
+          label.textContent = `${bar + 1}`;
           dom.timelineRuler.appendChild(label);
         }
       }
@@ -1202,6 +1271,26 @@
           const row = document.createElement('div');
           row.className = 'timeline-lane';
           row.dataset.lane = String(lane);
+          const header = document.createElement('div');
+          header.className = 'lane-header';
+          const label = document.createElement('div');
+          label.className = 'lane-label';
+          label.textContent = `Lane ${lane + 1}`;
+          const armBtn = document.createElement('button');
+          armBtn.className = 'lane-arm';
+          armBtn.textContent = 'R';
+          if (state.timeline.selectedLane === lane) {
+            armBtn.classList.add('armed');
+          }
+          armBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            state.timeline.selectedLane = lane;
+            renderTimeline();
+          });
+          header.appendChild(label);
+          header.appendChild(armBtn);
+          row.appendChild(header);
           dom.timelineLanes.appendChild(row);
         }
 
@@ -1217,9 +1306,12 @@
           clipEl.dataset.placementId = placement.id;
           const clipStart = placement.timelineStartSeconds;
           const duration = Math.max(0.01, placement.durationSeconds);
-          clipEl.style.left = `${timeToPx(clipStart)}px`;
+          clipEl.style.left = `${timeToPx(clipStart) + getLaneHeaderWidth()}px`;
           clipEl.style.width = `${Math.max(12, timeToPx(duration))}px`;
           clipEl.textContent = clip ? clip.name : placement.clipId;
+          if (clip && clip.source === 'recorded') {
+            clipEl.classList.add('locked');
+          }
           if (state.timeline.selectionId === placement.id) {
             clipEl.classList.add('selected');
           }
@@ -1238,7 +1330,7 @@
 
       function updateTimelinePlayhead() {
         if (!state.timeline.enabled || !dom.timelinePlayhead) return;
-        const left = timeToPx(state.playheadSeconds);
+        const left = timeToPx(state.playheadSeconds) + getLaneHeaderWidth();
         dom.timelinePlayhead.style.left = `${left}px`;
       }
 
@@ -1253,7 +1345,7 @@
           renderTimeline();
           return;
         }
-        el.style.left = `${timeToPx(placement.timelineStartSeconds)}px`;
+        el.style.left = `${timeToPx(placement.timelineStartSeconds) + getLaneHeaderWidth()}px`;
         el.style.width = `${Math.max(12, timeToPx(placement.durationSeconds))}px`;
       }
 
@@ -1279,11 +1371,16 @@
           const placementId = clipEl.dataset.placementId;
           const placement = getPlacementById(placementId);
           if (!placement) return;
+          const clip = getClipById(placement.clipId);
           selectPlacement(placementId);
           const rect = clipEl.getBoundingClientRect();
           const handle = event.target.classList.contains('clip-handle')
             ? (event.target.classList.contains('left') ? 'trim-left' : 'trim-right')
             : 'move';
+          if (handle === 'move' && clip && clip.source === 'recorded') {
+            event.preventDefault();
+            return;
+          }
           state.timeline.drag = {
             type: handle,
             placementId,
@@ -1300,8 +1397,8 @@
         }
 
         const canvasRect = dom.timelineCanvas.getBoundingClientRect();
-        const x = event.clientX - canvasRect.left + dom.timelineViewport.scrollLeft;
-        const seconds = snapToBeatGrid(pxToTime(x));
+        const x = event.clientX - canvasRect.left + dom.timelineViewport.scrollLeft - getLaneHeaderWidth();
+        const seconds = snapToBeatGrid(pxToTime(Math.max(0, x)));
         setPlayhead(seconds);
         if (state.timeline.selectionId) {
           state.timeline.selectionId = null;
@@ -1315,9 +1412,11 @@
         const drag = state.timeline.drag;
         const placement = getPlacementById(drag.placementId);
         if (!placement) return;
+        const clip = getClipById(placement.clipId);
         const deltaPx = event.clientX - drag.startX;
         const deltaSeconds = pxToTime(deltaPx);
         if (drag.type === 'move') {
+          if (clip && clip.source === 'recorded') return;
           const newStart = snapToBeatGrid(drag.startStart + deltaSeconds);
           placement.timelineStartSeconds = Math.max(0, newStart);
           const lanesRect = dom.timelineLanes.getBoundingClientRect();
@@ -1325,11 +1424,11 @@
           const laneIndex = Math.max(0, Math.min(state.timeline.lanes - 1, Math.floor(y / 54)));
           placement.lane = laneIndex;
         } else if (drag.type === 'trim-left') {
-          const clip = getClipById(placement.clipId);
           if (!clip) return;
           const newStart = snapToBeatGrid(drag.startStart + deltaSeconds);
           const maxStart = drag.startStart + drag.startDuration - 0.1;
-          const clampedStart = Math.min(maxStart, Math.max(0, newStart));
+          const minStart = Math.max(0, drag.startStart - drag.startClipIn);
+          const clampedStart = Math.min(maxStart, Math.max(minStart, newStart));
           const delta = clampedStart - drag.startStart;
           const newClipIn = Math.max(0, drag.startClipIn + delta);
           const maxClipIn = Math.max(0, clip.durationSeconds - 0.1);
@@ -1337,7 +1436,6 @@
           placement.clipInSeconds = Math.min(maxClipIn, newClipIn);
           placement.durationSeconds = Math.max(0.1, drag.startDuration - delta);
         } else if (drag.type === 'trim-right') {
-          const clip = getClipById(placement.clipId);
           if (!clip) return;
           const newDur = snapToBeatGrid(drag.startDuration + deltaSeconds);
           const maxDur = Math.max(0.1, clip.durationSeconds - placement.clipInSeconds);
@@ -1622,14 +1720,16 @@
           const src = asset.getAttribute('src') || '';
           const duration = parseFcpTime(asset.getAttribute('duration'));
           const filename = extractFilenameFromSrc(src) || `${assetId}.mov`;
-          const isWebm = filename.toLowerCase().endsWith('.webm');
+          const lower = filename.toLowerCase();
+          const isWebm = lower.endsWith('.webm');
+          const recordedByName = /^clip-[a-z0-9]+\.(webm|mov)$/.test(lower);
           const clipId = makeId('clip');
           const clip = {
             id: clipId,
             name,
             createdAt: new Date().toISOString(),
             durationSeconds: duration,
-            source: isWebm ? 'recorded' : 'imported',
+            source: (recordedByName || isWebm) ? 'recorded' : 'imported',
             filename,
             startSeconds: 0,
           };
@@ -2152,10 +2252,17 @@
           return;
         }
 
+        const rawStart = state.timeline.enabled
+          ? snapToBeatGrid(state.playheadSeconds)
+          : state.playheadSeconds;
+        const recordStart = Math.max(0, snapSeconds(rawStart, state.settings.fps));
+        if (Math.abs(recordStart - state.playheadSeconds) > 0.0001) {
+          setPlayhead(recordStart);
+        }
         const mimeType = getSupportedMimeType();
         const extension = 'webm';
         const clipId = makeId('clip');
-        const clipName = `Take ${pad(state.clips.length + 1, 3)} ${secondsToSMPTE(state.playheadSeconds, state.settings.fps)}`;
+        const clipName = `Take ${pad(state.clips.length + 1, 3)} ${secondsToSMPTE(recordStart, state.settings.fps)}`;
         const clip = {
           id: clipId,
           name: clipName,
@@ -2163,14 +2270,14 @@
           durationSeconds: 0,
           source: 'recorded',
           filename: `${clipId}.${extension}`,
-          startSeconds: state.playheadSeconds,
+          startSeconds: recordStart,
         };
         state.clips.push(clip);
 
         const placement = {
           id: makeId('plc'),
           clipId,
-          timelineStartSeconds: state.playheadSeconds,
+          timelineStartSeconds: recordStart,
           clipInSeconds: 0,
           clipOutSeconds: 0,
           durationSeconds: 0,
@@ -2192,7 +2299,7 @@
           active: true,
           pending: false,
           clipId,
-          startPlayhead: state.playheadSeconds,
+          startPlayhead: recordStart,
           recorder,
           chunks,
         };

@@ -144,13 +144,12 @@
     }
 
     #app.timeline-enabled #monitor {
-      min-height: 260px;
-    }
-
-    #app.timeline-enabled #monitor {
       grid-column: 3;
       grid-row: 1;
       align-self: start;
+      display: grid;
+      grid-template-rows: auto auto;
+      align-content: start;
     }
 
     #app.timeline-enabled #takes {
@@ -344,7 +343,8 @@
 
     #app.timeline-enabled #monitorFrame {
       margin: 6px 6px 0;
-      min-height: 140px;
+      height: 160px;
+      min-height: 0;
     }
 
     #liveVideo {
@@ -552,7 +552,7 @@
       top: 4px;
       font-size: 10px;
       color: var(--muted);
-      transform: translateX(-50%);
+      transform: translateX(0);
       white-space: nowrap;
     }
 
@@ -667,6 +667,29 @@
       justify-content: center;
     }
 
+    .export-status {
+      min-width: 70px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      opacity: 0;
+    }
+
+    .export-status.show {
+      animation: exportFade 2.6s ease forwards;
+    }
+
+    .export-history {
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    @keyframes exportFade {
+      0% { opacity: 1; }
+      70% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
     @media (max-width: 1100px) {
       #content {
         grid-template-columns: 1fr;
@@ -753,7 +776,9 @@
               </div>
               <div class="row">
                 <button id="exportPackageBtn" class="primary">Export Resolve Package</button>
+                <span id="exportStatusBadge" class="export-status"></span>
               </div>
+              <div id="exportHistory" class="export-history"></div>
               <div class="field">
                 <label>Convert Command</label>
                 <div class="row">
@@ -893,6 +918,7 @@
         stage: {
           currentPlacementId: '',
           updateToken: 0,
+          lastUrl: '',
         },
         clips: [],
         placements: [],
@@ -923,6 +949,8 @@
         dom.refreshDevices = document.getElementById('refreshDevices');
         dom.chooseFolderBtn = document.getElementById('chooseFolderBtn');
         dom.exportPackageBtn = document.getElementById('exportPackageBtn');
+        dom.exportStatusBadge = document.getElementById('exportStatusBadge');
+        dom.exportHistory = document.getElementById('exportHistory');
         dom.convertCmdInline = document.getElementById('convertCmdInline');
         dom.copyConvertBtn = document.getElementById('copyConvertBtn');
         dom.folderStatus = document.getElementById('folderStatus');
@@ -956,6 +984,11 @@
 
       function makeId(prefix) {
         return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+      }
+
+      function formatClockTime(date = new Date()) {
+        const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        return time.replace('AM', 'am').replace('PM', 'pm');
       }
 
       function setPlayhead(seconds) {
@@ -1024,6 +1057,20 @@
       function setExportStatus(message) {
         state.export.statusMessage = message || '';
         updateExportNotes();
+      }
+
+      function setExportBadge(action) {
+        if (!dom.exportStatusBadge) return;
+        const text = action === 'updated' ? 'Updated' : 'Exported';
+        dom.exportStatusBadge.textContent = text;
+        dom.exportStatusBadge.classList.remove('show');
+        void dom.exportStatusBadge.offsetWidth;
+        dom.exportStatusBadge.classList.add('show');
+        if (dom.exportHistory) {
+          const stamp = formatClockTime(new Date());
+          const historyText = action === 'updated' ? `Updated ${stamp}` : `Exported ${stamp}`;
+          dom.exportHistory.textContent = historyText;
+        }
       }
 
       function updateFolderStatus() {
@@ -1136,6 +1183,7 @@
           dom.stageVideo.style.display = 'none';
           dom.stagePlaceholder.style.display = 'flex';
           state.stage.currentPlacementId = '';
+          state.stage.lastUrl = '';
           return;
         }
         const placementId = topEntry.placement.id;
@@ -1148,17 +1196,22 @@
         const url = await ensureClipMedia(topEntry.clip);
         if (token !== state.stage.updateToken) return;
         if (!url) return;
-        if (state.stage.currentPlacementId !== placementId || dom.stageVideo.src !== url) {
+        const clipChanged = state.stage.currentPlacementId !== placementId || state.stage.lastUrl !== url;
+        if (clipChanged || dom.stageVideo.src !== url) {
           dom.stageVideo.src = url;
           dom.stageVideo.load();
+          state.stage.lastUrl = url;
         }
         dom.stagePlaceholder.style.display = 'none';
         dom.stageVideo.style.display = 'block';
         const applySeek = () => {
-          try {
-            dom.stageVideo.currentTime = seekTime;
-          } catch (error) {
-            // Ignore seek errors for unloaded media.
+          const drift = Math.abs((dom.stageVideo.currentTime || 0) - seekTime);
+          if (!state.midi.clock.playing || clipChanged || drift > 0.08) {
+            try {
+              dom.stageVideo.currentTime = seekTime;
+            } catch (error) {
+              // Ignore seek errors for unloaded media.
+            }
           }
           if (state.midi.clock.playing) {
             dom.stageVideo.play().catch(() => {});
@@ -2193,7 +2246,20 @@
           updateFolderStatus();
           return;
         }
+        let hasExisting = false;
         if (state.projectHandle) {
+          try {
+            const mediaDir = await state.projectHandle.getDirectoryHandle('media', { create: false });
+            await mediaDir.getFileHandle('camorder-stacked-mov.fcpxml');
+            hasExisting = true;
+          } catch (error) {
+            try {
+              await state.projectHandle.getFileHandle('camorder-stacked-mov.fcpxml');
+              hasExisting = true;
+            } catch (innerError) {
+              // Not found.
+            }
+          }
           await removeExportArtifacts();
         }
         const fcpxmlMov = buildStackedFcpXml(true);
@@ -2217,6 +2283,7 @@
         } else {
           setExportStatus('Resolve package exported. Convert command unavailable for this folder selection.');
         }
+        setExportBadge(hasExisting ? 'updated' : 'exported');
       }
 
       function getClipById(clipId) {
@@ -2255,7 +2322,9 @@
         const rawStart = state.timeline.enabled
           ? snapToBeatGrid(state.playheadSeconds)
           : state.playheadSeconds;
-        const recordStart = Math.max(0, snapSeconds(rawStart, state.settings.fps));
+        const recordStart = state.timeline.enabled
+          ? Math.max(0, rawStart)
+          : Math.max(0, snapSeconds(rawStart, state.settings.fps));
         if (Math.abs(recordStart - state.playheadSeconds) > 0.0001) {
           setPlayhead(recordStart);
         }
@@ -2309,7 +2378,10 @@
 
       function updateRecordingDuration() {
         if (!state.recording.active) return;
-        const duration = Math.max(0, state.playheadSeconds - state.recording.startPlayhead);
+        const rawDuration = Math.max(0, state.playheadSeconds - state.recording.startPlayhead);
+        const duration = state.timeline.enabled
+          ? snapToBeatGrid(rawDuration)
+          : snapSeconds(rawDuration, state.settings.fps);
         const placement = state.placements.find((item) => item.clipId === state.recording.clipId);
         if (placement) {
           placement.durationSeconds = duration;
@@ -2364,7 +2436,11 @@
         const clip = getClipById(recording.clipId);
         if (!clip) return;
         const blob = new Blob(recording.chunks, { type: recording.mimeType || 'video/webm' });
-        clip.durationSeconds = Math.max(0, state.playheadSeconds - clip.startSeconds);
+        const rawDuration = Math.max(0, state.playheadSeconds - clip.startSeconds);
+        const snappedDuration = state.timeline.enabled
+          ? snapToBeatGrid(rawDuration)
+          : snapSeconds(rawDuration, state.settings.fps);
+        clip.durationSeconds = snappedDuration;
         const placement = state.placements.find((item) => item.clipId === clip.id);
         if (placement) {
           placement.durationSeconds = clip.durationSeconds;

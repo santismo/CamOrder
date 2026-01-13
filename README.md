@@ -1,5 +1,12 @@
 ## CamOrder Workflow (Quick Start)
 
+0) Install FFmpeg (required for the convert script):
+   - If you already have FFmpeg, skip this step.
+   - On macOS with Homebrew:
+     - `brew install ffmpeg`
+     - verify: `ffmpeg -version`
+   - If `brew` is not installed yet, install Homebrew first (brew.sh), then run the command above.
+
 1) Open `CAMORDER PRO v1.html` in Chrome. (relies on Chrome functions)
 2) Click **Choose Project Folder** and select your project folder.
 3) Enable MIDI + Camera, arm the recorder, and record your takes.

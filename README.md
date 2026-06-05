@@ -34,3 +34,30 @@ sh convert-to-mov.sh
 - Choose `media/camorder-stacked-mov.fcpxml`
 10) If Resolve can’t find clips:
 - Add your project folder to **Media Storage**, then re‑import the FCPXML.
+
+## CamOrder Studio Native App
+
+The native macOS app scaffold lives in `CamOrderStudio/` and is separate from the existing browser workflow.
+
+Build and test:
+
+```sh
+cd CamOrderStudio
+swift test
+```
+
+Run the SwiftUI app from source:
+
+```sh
+cd CamOrderStudio
+swift run CamOrderStudio
+```
+
+Install it as a macOS app in `/Applications`:
+
+```sh
+cd CamOrderStudio
+Scripts/install-camorder-studio.sh
+```
+
+In the app, create a `.camorderstudio` project folder, import a video file, and select it in the Media / Takes list to preview it. Logic sync, camera recording, mastered-audio import, and render export are scaffolded for follow-up milestones.

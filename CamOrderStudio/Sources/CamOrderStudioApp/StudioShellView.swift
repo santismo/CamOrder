@@ -849,16 +849,21 @@ private struct PlaybackCanvasView: View {
                 },
                 onFramingCommitted: { framing in
                     liveFraming = framing
-                    pendingCommittedFraming = framing
-                    store.updateSelectedClipFraming(
-                        zoom: framing.zoom,
-                        offsetX: framing.offsetX,
-                        offsetY: framing.offsetY,
-                        rotationDegrees: framing.rotationDegrees,
-                        trackUndo: true,
-                        save: true,
-                        origin: .canvas
-                    )
+                    if clip.automationMarkers.isEmpty {
+                        pendingCommittedFraming = framing
+                        store.updateSelectedClipFraming(
+                            zoom: framing.zoom,
+                            offsetX: framing.offsetX,
+                            offsetY: framing.offsetY,
+                            rotationDegrees: framing.rotationDegrees,
+                            trackUndo: true,
+                            save: true,
+                            origin: .canvas
+                        )
+                    } else {
+                        pendingCommittedFraming = nil
+                        store.insertAutomationMarker(at: playheadSeconds, framing: framing)
+                    }
                     isManipulatingFraming = false
                 },
                 onCanvasPixelSizeChanged: onCanvasPixelSizeChanged,
@@ -2577,11 +2582,6 @@ private struct ClipBlock: View {
                 .fill(clip.isEnabled ? Color.accentColor.opacity(0.82) : Color.gray.opacity(0.42))
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(isSelected ? Color.yellow : Color.clear, lineWidth: 3)
-            ForEach(visibleAutomationMarkers) { marker in
-                automationMarkerView
-                    .offset(x: marker.timeSeconds * secondsToPixels - width / 2)
-                    .allowsHitTesting(false)
-            }
             HStack(spacing: 0) {
                 Rectangle()
                     .fill(Color.white.opacity(0.45))
@@ -2643,6 +2643,11 @@ private struct ClipBlock: View {
                 .shadow(color: .black.opacity(0.28), radius: 1, x: 0, y: 1)
                 .padding(.horizontal, 6)
             }
+            ForEach(visibleAutomationMarkers) { marker in
+                automationMarkerView
+                    .offset(x: markerX(for: marker, width: width) - width / 2)
+                    .allowsHitTesting(false)
+            }
         }
         .frame(width: width, height: 40)
         .offset(x: (previewMoveSeconds + leftDelta) * secondsToPixels)
@@ -2660,13 +2665,25 @@ private struct ClipBlock: View {
     private var automationMarkerView: some View {
         VStack(spacing: 0) {
             Image(systemName: "flag.fill")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.yellow)
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(.yellow, .black.opacity(0.72))
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .background(.black.opacity(0.58), in: Capsule())
             Rectangle()
-                .fill(Color.yellow.opacity(0.92))
-                .frame(width: 2, height: 31)
+                .fill(Color.yellow)
+                .frame(width: 3, height: 31)
+                .overlay {
+                    Rectangle()
+                        .stroke(Color.black.opacity(0.68), lineWidth: 1)
+                }
         }
-        .shadow(color: .black.opacity(0.45), radius: 1, x: 0, y: 1)
+        .shadow(color: .black.opacity(0.72), radius: 2, x: 0, y: 1)
+    }
+
+    private func markerX(for marker: ClipAutomationMarker, width: CGFloat) -> CGFloat {
+        let rawX = marker.timeSeconds * secondsToPixels
+        return min(max(12, rawX), max(12, width - 12))
     }
 
     private func seconds(for translationWidth: CGFloat) -> Double {

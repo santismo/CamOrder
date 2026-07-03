@@ -925,7 +925,7 @@ final class ProjectStore: ObservableObject {
         automationClipLocation(at: timelineSeconds) != nil
     }
 
-    func insertAutomationMarker(at timelineSeconds: Double) {
+    func insertAutomationMarker(at timelineSeconds: Double, framing explicitFraming: ClipFraming? = nil) {
         guard var document else { return }
         guard let location = automationClipLocation(at: timelineSeconds, in: document.project) else {
             lastError = "Select a region or place the playhead over a region before inserting an automation marker."
@@ -935,7 +935,7 @@ final class ProjectStore: ObservableObject {
         registerUndo(project: document.project)
         var clip = document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex]
         let localSeconds = min(max(0, timelineSeconds - clip.timelineStartSeconds), clip.durationSeconds)
-        let markerFraming = clip.framing ?? clip.automatedFraming(atLocalSecond: localSeconds)
+        let markerFraming = explicitFraming ?? clip.automatedFraming(atLocalSecond: localSeconds)
         let tolerance = max(0.02, 0.5 / max(1, clip.frameRate.framesPerSecond))
         if let markerIndex = clip.automationMarkers.firstIndex(where: { abs($0.timeSeconds - localSeconds) <= tolerance }) {
             clip.automationMarkers[markerIndex].timeSeconds = localSeconds

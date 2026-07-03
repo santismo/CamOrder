@@ -299,11 +299,12 @@ public struct ClipFraming: Codable, Equatable, Sendable {
 
     public static func interpolate(from start: ClipFraming, to end: ClipFraming, progress: Double) -> ClipFraming {
         let clampedProgress = max(0, min(1, progress))
+        let easedProgress = clampedProgress * clampedProgress * (3 - 2 * clampedProgress)
         return ClipFraming(
-            zoom: interpolate(start.zoom, end.zoom, clampedProgress),
-            offsetX: interpolate(start.offsetX, end.offsetX, clampedProgress),
-            offsetY: interpolate(start.offsetY, end.offsetY, clampedProgress),
-            rotationDegrees: interpolateRotation(start.rotationDegrees, end.rotationDegrees, clampedProgress)
+            zoom: interpolate(start.zoom, end.zoom, easedProgress),
+            offsetX: interpolate(start.offsetX, end.offsetX, easedProgress),
+            offsetY: interpolate(start.offsetY, end.offsetY, easedProgress),
+            rotationDegrees: interpolateRotation(start.rotationDegrees, end.rotationDegrees, easedProgress)
         )
     }
 

@@ -878,6 +878,22 @@ public final class RenderExportEngine: ObservableObject {
                         boundaries.insert(markerSeconds)
                     }
                 }
+                let localAutomationTimes = ([0] + clip.automationMarkers.map(\.timeSeconds))
+                    .filter { $0.isFinite && $0 >= 0 && $0 <= clip.durationSeconds }
+                    .sorted()
+                let uniqueLocalAutomationTimes = localAutomationTimes.reduce(into: [Double]()) { result, seconds in
+                    guard result.last.map({ abs($0 - seconds) > 0.001 }) ?? true else { return }
+                    result.append(seconds)
+                }
+                for index in 0..<(max(0, uniqueLocalAutomationTimes.count - 1)) {
+                    let start = uniqueLocalAutomationTimes[index]
+                    let end = uniqueLocalAutomationTimes[index + 1]
+                    guard end - start > 0.25 else { continue }
+                    for step in 1..<8 {
+                        let progress = Double(step) / 8.0
+                        boundaries.insert(clip.timelineStartSeconds + start + (end - start) * progress)
+                    }
+                }
             }
         }
         let sortedBoundaries = boundaries.filter { $0.isFinite && $0 >= 0 }.sorted()

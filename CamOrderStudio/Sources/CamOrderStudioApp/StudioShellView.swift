@@ -2054,6 +2054,7 @@ private struct TimelineView: View {
                                         ForEach(lane.clips) { clip in
                                             ClipBlock(
                                                 clip: clip,
+                                                videoURL: videoURL(for: clip),
                                                 secondsToPixels: secondsToPixels,
                                                 isSelected: store.selectedClipId == clip.id,
                                                 onMove: { startSeconds in
@@ -2161,6 +2162,15 @@ private struct TimelineView: View {
 
     private var activePlayheadSeconds: Double {
         editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+    }
+
+    private func videoURL(for clip: VideoClip) -> URL? {
+        guard let asset = store.mediaAsset(for: clip),
+              let url = store.absoluteURL(for: asset),
+              FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        return url
     }
 
     private func laneFill(for lane: VideoLane) -> Color {
@@ -2563,6 +2573,7 @@ private struct PendingClipBlock: View {
 
 private struct ClipBlock: View {
     let clip: VideoClip
+    let videoURL: URL?
     let secondsToPixels: Double
     let isSelected: Bool
     let onMove: (Double) -> Void
@@ -2579,7 +2590,20 @@ private struct ClipBlock: View {
         let width = max(72, previewDuration * secondsToPixels)
         ZStack {
             RoundedRectangle(cornerRadius: 6)
-                .fill(clip.isEnabled ? Color.accentColor.opacity(0.82) : Color.gray.opacity(0.42))
+                .fill(Color.black.opacity(0.46))
+            if let videoURL {
+                TimelineClipFilmstripView(
+                    url: videoURL,
+                    trimInSeconds: max(0, clip.trimInSeconds),
+                    durationSeconds: previewDuration,
+                    width: width
+                )
+                .frame(width: width, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .opacity(clip.isEnabled ? 0.90 : 0.42)
+            }
+            RoundedRectangle(cornerRadius: 6)
+                .fill(clipOverlayColor(hasVideo: videoURL != nil))
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(isSelected ? Color.yellow : Color.clear, lineWidth: 3)
             HStack(spacing: 0) {
@@ -2641,7 +2665,9 @@ private struct ClipBlock: View {
                 .lineLimit(1)
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.28), radius: 1, x: 0, y: 1)
-                .padding(.horizontal, 6)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(.black.opacity(videoURL == nil ? 0.14 : 0.44), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             }
             ForEach(visibleAutomationMarkers) { marker in
                 automationMarkerView
@@ -2660,6 +2686,13 @@ private struct ClipBlock: View {
         clip.automationMarkers.filter { marker in
             marker.timeSeconds >= 0 && marker.timeSeconds <= clip.durationSeconds
         }
+    }
+
+    private func clipOverlayColor(hasVideo: Bool) -> Color {
+        if !clip.isEnabled {
+            return Color.gray.opacity(hasVideo ? 0.26 : 0.42)
+        }
+        return Color.accentColor.opacity(hasVideo ? 0.16 : 0.82)
     }
 
     private var automationMarkerView: some View {
@@ -2700,6 +2733,158 @@ private struct ClipBlock: View {
 
     private func clampedRightDelta(_ seconds: Double, leftDelta: Double) -> Double {
         max(seconds, -clip.durationSeconds + leftDelta + 0.1)
+    }
+}
+
+private struct TimelineClipFilmstripView: NSViewRepresentable {
+    let url: URL
+    let trimInSeconds: Double
+    let durationSeconds: Double
+    let width: CGFloat
+
+    func makeNSView(context: Context) -> TimelineClipFilmstripNSView {
+        TimelineClipFilmstripNSView()
+    }
+
+    func updateNSView(_ nsView: TimelineClipFilmstripNSView, context: Context) {
+        nsView.update(
+            url: url,
+            trimInSeconds: trimInSeconds,
+            durationSeconds: durationSeconds,
+            expectedWidth: width
+        )
+    }
+}
+
+private final class TimelineClipFilmstripNSView: NSView {
+    private static let renderQueue = DispatchQueue(label: "CamOrderStudio.timeline-filmstrip", qos: .userInitiated, attributes: .concurrent)
+    private static let cache = NSCache<NSString, TimelineClipFilmstripCacheEntry>()
+
+    private var requestKey: String?
+    private var images: [CGImage] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    override func layout() {
+        super.layout()
+        render(images: images)
+    }
+
+    func update(url: URL, trimInSeconds: Double, durationSeconds: Double, expectedWidth: CGFloat) {
+        let sampleCount = Self.sampleCount(for: expectedWidth)
+        let key = Self.cacheKey(
+            url: url,
+            trimInSeconds: trimInSeconds,
+            durationSeconds: durationSeconds,
+            sampleCount: sampleCount
+        )
+        guard key != requestKey else { return }
+        requestKey = key
+
+        if let cached = Self.cache.object(forKey: key as NSString) {
+            images = cached.images
+            render(images: cached.images)
+            return
+        }
+
+        images = []
+        renderPlaceholder()
+
+        Self.renderQueue.async { [weak self] in
+            let generatedImages = Self.generateImages(
+                url: url,
+                trimInSeconds: trimInSeconds,
+                durationSeconds: durationSeconds,
+                sampleCount: sampleCount
+            )
+            Self.cache.setObject(TimelineClipFilmstripCacheEntry(images: generatedImages), forKey: key as NSString)
+            DispatchQueue.main.async {
+                guard let self, self.requestKey == key else { return }
+                self.images = generatedImages
+                self.render(images: generatedImages)
+            }
+        }
+    }
+
+    private func configure() {
+        wantsLayer = true
+        layer = CALayer()
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.36).cgColor
+        layer?.masksToBounds = true
+    }
+
+    private func render(images: [CGImage]) {
+        guard let layer else { return }
+        layer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        guard !images.isEmpty, bounds.width > 0, bounds.height > 0 else {
+            renderPlaceholder()
+            return
+        }
+
+        let tileWidth = bounds.width / CGFloat(images.count)
+        for (index, image) in images.enumerated() {
+            let imageLayer = CALayer()
+            imageLayer.contents = image
+            imageLayer.contentsGravity = .resizeAspectFill
+            imageLayer.masksToBounds = true
+            imageLayer.frame = CGRect(
+                x: CGFloat(index) * tileWidth,
+                y: 0,
+                width: tileWidth + 0.5,
+                height: bounds.height
+            )
+            layer.addSublayer(imageLayer)
+        }
+    }
+
+    private func renderPlaceholder() {
+        guard let layer else { return }
+        layer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        layer.backgroundColor = NSColor.black.withAlphaComponent(0.38).cgColor
+    }
+
+    private static func generateImages(url: URL, trimInSeconds: Double, durationSeconds: Double, sampleCount: Int) -> [CGImage] {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 180, height: 90)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.15, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.15, preferredTimescale: 600)
+
+        let count = max(1, sampleCount)
+        let duration = max(0.1, durationSeconds)
+        return (0..<count).compactMap { index in
+            let progress = count == 1 ? 0.5 : Double(index) / Double(count - 1)
+            let seconds = max(0, trimInSeconds + duration * progress)
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            return try? generator.copyCGImage(at: time, actualTime: nil)
+        }
+    }
+
+    private static func sampleCount(for width: CGFloat) -> Int {
+        min(12, max(1, Int((max(72, width) / 58).rounded(.up))))
+    }
+
+    private static func cacheKey(url: URL, trimInSeconds: Double, durationSeconds: Double, sampleCount: Int) -> String {
+        let trimKey = Int((trimInSeconds * 10).rounded())
+        let durationKey = Int((durationSeconds * 10).rounded())
+        return "\(url.path)|\(trimKey)|\(durationKey)|\(sampleCount)"
+    }
+}
+
+private final class TimelineClipFilmstripCacheEntry: NSObject {
+    let images: [CGImage]
+
+    init(images: [CGImage]) {
+        self.images = images
     }
 }
 

@@ -15,12 +15,20 @@ private final class EditPlaybackController: ObservableObject {
     private var audioPlayer: AVPlayer?
     private var audioURL: URL?
 
+    deinit {
+        timer?.invalidate()
+        audioPlayer?.pause()
+    }
+
     func togglePlay(duration: Double) {
         isPlaying ? pause() : play(duration: duration)
     }
 
     func play(duration: Double) {
         isEditMode = true
+        if duration > 0 {
+            playheadSeconds = min(max(0, duration), playheadSeconds)
+        }
         isPlaying = true
         lastTickDate = Date()
         startTimer(duration: duration)
@@ -45,7 +53,8 @@ private final class EditPlaybackController: ObservableObject {
     }
 
     func step(by seconds: Double, duration: Double, audioOffsetSeconds: Double) {
-        let next = max(0, playheadSeconds + seconds)
+        let upperBound = duration > 0 ? max(0, duration) : Double.greatestFiniteMagnitude
+        let next = min(upperBound, max(0, playheadSeconds + seconds))
         seek(to: next, audioOffsetSeconds: audioOffsetSeconds)
     }
 
@@ -100,19 +109,29 @@ struct StudioShellView: View {
             Divider()
             VSplitView {
                 HSplitView {
-                    InspectorPane(syncEngine: syncEngine, cameraEngine: cameraEngine, captureRegionController: captureRegionController)
+                    StudioPanel {
+                        InspectorPane(syncEngine: syncEngine, cameraEngine: cameraEngine, captureRegionController: captureRegionController)
+                    }
                         .frame(minWidth: 280, idealWidth: 340)
-                    PlaybackPreviewPane(syncEngine: syncEngine, editPlayback: editPlayback)
+                    StudioPanel {
+                        PlaybackPreviewPane(syncEngine: syncEngine, editPlayback: editPlayback)
+                    }
                         .frame(minWidth: 420)
-                    LiveInputAndMediaPane(cameraEngine: cameraEngine, captureRegionController: captureRegionController)
+                    StudioPanel {
+                        LiveInputAndMediaPane(cameraEngine: cameraEngine, captureRegionController: captureRegionController)
+                    }
                         .frame(minWidth: 280, idealWidth: 340)
                 }
                 .frame(minHeight: 260)
-                TimelineView(syncEngine: syncEngine, editPlayback: editPlayback, secondsToPixels: timelineZoom, timelineZoom: $timelineZoom)
-                    .frame(minHeight: 160, idealHeight: 310)
+                .padding([.horizontal, .top], 10)
+                StudioPanel {
+                    TimelineView(syncEngine: syncEngine, editPlayback: editPlayback, secondsToPixels: timelineZoom, timelineZoom: $timelineZoom)
+                }
+                .frame(minHeight: 160, idealHeight: 310)
+                .padding([.horizontal, .bottom], 10)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(StudioWindowBackground())
         .alert("CamOrder Studio", isPresented: Binding(get: { store.lastError != nil }, set: { if !$0 { store.lastError = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -168,6 +187,14 @@ struct StudioShellView: View {
             return true
         }
 
+        if !modifierFlags.contains(.command),
+           !modifierFlags.contains(.option),
+           !modifierFlags.contains(.control),
+           event.charactersIgnoringModifiers?.lowercased() == "m" {
+            store.insertAutomationMarker(at: activePlayheadSeconds)
+            return true
+        }
+
         guard editPlayback.isEditMode else { return false }
 
         switch event.keyCode {
@@ -192,6 +219,87 @@ struct StudioShellView: View {
         default:
             return false
         }
+    }
+
+    private var activePlayheadSeconds: Double {
+        editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+    }
+}
+
+private struct StudioWindowBackground: View {
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+            Color(nsColor: .underPageBackgroundColor)
+                .opacity(0.74)
+            Color.black
+                .opacity(0.30)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+private struct StudioPanel<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .background {
+                ZStack {
+                    Rectangle()
+                        .fill(.regularMaterial)
+                    Color.black.opacity(0.22)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.42), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 5)
+    }
+}
+
+private struct StatusPill: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .lineLimit(1)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(tint.opacity(0.12), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(tint.opacity(0.24), lineWidth: 1)
+            }
+    }
+}
+
+private struct SymbolToolButton: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(help)
     }
 }
 
@@ -252,26 +360,34 @@ private struct TransportSyncBar: View {
     @State private var isRendering = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(store.document?.project.name ?? "No Project")
-                    .font(.headline)
-                Text(store.document?.folderURL.path ?? "Create or open a .camorderstudio project")
-                    .font(.caption)
+        HStack(spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "video.badge.waveform")
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Button("New") {
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.document?.project.name ?? "No Project")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(store.document?.folderURL.path ?? "Create or open a .camorderstudio project")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(minWidth: 220, maxWidth: 360, alignment: .leading)
+                ControlGroup {
+                    SymbolToolButton(systemImage: "doc.badge.plus", help: "New Project") {
                         store.createProject()
                     }
-                    Button("Open") {
+                    SymbolToolButton(systemImage: "folder", help: "Open Project") {
                         store.openProject()
                     }
-                    Button("Save") {
+                    SymbolToolButton(systemImage: "square.and.arrow.down", help: "Save Project") {
                         store.saveProject()
                     }
                     .disabled(!store.hasOpenProject)
-                    Button("Save As") {
+                    SymbolToolButton(systemImage: "doc.on.doc", help: "Save Project As") {
                         store.saveProjectAs()
                     }
                     .disabled(!store.hasOpenProject)
@@ -279,54 +395,69 @@ private struct TransportSyncBar: View {
                 .controlSize(.small)
             }
             Spacer()
-            Label(formatTimelineSeconds(activePlayheadSeconds, frameRate: store.project.frameRate, format: store.clockDisplayFormat), systemImage: "timeline.selection")
-                .font(.system(.body, design: .monospaced))
-            Label(editPlayback.isEditMode ? "edit mode" : syncEngine.state.rawValue, systemImage: syncIcon)
-                .foregroundStyle(syncEngine.state == .unstable || syncEngine.state == .error ? .red : .primary)
-            Label(recordStatus, systemImage: store.pendingTake == nil ? "record.circle" : "record.circle.fill")
-                .foregroundStyle(store.pendingTake == nil ? Color.secondary : Color.red)
+            VStack(spacing: 1) {
+                Text(formatTimelineSeconds(activePlayheadSeconds, frameRate: store.project.frameRate, format: store.clockDisplayFormat))
+                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                Text(editPlayback.isEditMode ? "EDIT PLAYHEAD" : "LOGIC CHASE")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.42), lineWidth: 1)
+            }
+            HStack(spacing: 6) {
+                StatusPill(title: editPlayback.isEditMode ? "Edit" : syncEngine.state.rawValue, systemImage: syncIcon, tint: syncTint)
+                StatusPill(title: recordStatus, systemImage: store.pendingTake == nil ? "record.circle" : "record.circle.fill", tint: recordTint)
+            }
+            .frame(maxWidth: 320, alignment: .trailing)
             Toggle("Edit", isOn: $editPlayback.isEditMode)
                 .toggleStyle(.switch)
-            Button {
-                editPlayback.togglePlay(duration: max(store.project.timeline.durationSeconds, activePlayheadSeconds + 10))
-            } label: {
-                Label(editPlayback.isPlaying ? "Pause" : "Play", systemImage: editPlayback.isPlaying ? "pause.fill" : "play.fill")
+                .controlSize(.small)
+            ControlGroup {
+                SymbolToolButton(systemImage: editPlayback.isPlaying ? "pause.fill" : "play.fill", help: editPlayback.isPlaying ? "Pause" : "Play") {
+                    editPlayback.togglePlay(duration: max(store.project.timeline.durationSeconds, activePlayheadSeconds + 10))
+                }
+                .disabled(store.document == nil)
+                SymbolToolButton(systemImage: "stop.fill", help: "Stop") {
+                    editPlayback.stop()
+                }
+                .disabled(!editPlayback.isEditMode)
+                SymbolToolButton(systemImage: "arrow.triangle.2.circlepath", help: "Refresh MIDI") {
+                    syncEngine.refreshSources()
+                }
+                SymbolToolButton(systemImage: "arrow.uturn.backward", help: "Undo") {
+                    store.undoProjectChange()
+                }
+                .disabled(!store.canUndo)
+                SymbolToolButton(systemImage: "arrow.uturn.forward", help: "Redo") {
+                    store.redoProjectChange()
+                }
+                .disabled(!store.canRedo)
+                SymbolToolButton(systemImage: "square.and.arrow.down", help: "Render Video") {
+                    renderProject()
+                }
+                .disabled(store.document == nil || isRendering)
             }
-            .disabled(store.document == nil)
-            Button {
-                editPlayback.stop()
-            } label: {
-                Label("Stop", systemImage: "stop.fill")
-            }
-            .disabled(!editPlayback.isEditMode)
-            Button("Refresh MIDI") {
-                syncEngine.refreshSources()
-            }
-            Button {
-                store.undoProjectChange()
-            } label: {
-                Label("Undo", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(!store.canUndo)
-            Button {
-                store.redoProjectChange()
-            } label: {
-                Label("Redo", systemImage: "arrow.uturn.forward")
-            }
-            .disabled(!store.canRedo)
-            Button {
-                renderProject()
-            } label: {
-                Label("Render", systemImage: "square.and.arrow.down")
-            }
-            .disabled(store.document == nil || isRendering)
+            .controlSize(.small)
             if isRendering {
                 ProgressView(value: renderEngine.progress)
                     .frame(width: 86)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background {
+            ZStack {
+                Rectangle()
+                    .fill(.bar)
+                Color.black.opacity(0.12)
+            }
+        }
         .onAppear {
             startArmedBufferIfNeeded()
         }
@@ -451,6 +582,32 @@ private struct TransportSyncBar: View {
         }
     }
 
+    private var syncTint: Color {
+        if editPlayback.isEditMode {
+            return .accentColor
+        }
+        switch syncEngine.state {
+        case .playing, .chasing:
+            return .green
+        case .unstable, .error:
+            return .red
+        case .waitingForTimecode, .disconnected:
+            return .secondary
+        default:
+            return .primary
+        }
+    }
+
+    private var recordTint: Color {
+        if store.pendingTake != nil {
+            return .red
+        }
+        if store.armedBuffer != nil || store.hasArmedLane {
+            return .orange
+        }
+        return .secondary
+    }
+
     private var recordStatus: String {
         if let pendingTake = store.pendingTake {
             return "Recording \(pendingTake.clipId)"
@@ -472,20 +629,22 @@ private struct MediaBrowserView: View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader("Media / Takes")
             Spacer(minLength: 8)
-            Button {
-                store.openVideoMediaFolder()
-            } label: {
-                Label("Open Video Folder", systemImage: "folder")
-                    .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, 10)
-            Button {
-                store.importVideo()
-            } label: {
-                Label("Import Existing Video", systemImage: "plus")
-                    .frame(maxWidth: .infinity)
+            VStack(spacing: 8) {
+                Button {
+                    store.openVideoMediaFolder()
+                } label: {
+                    Label("Video Folder", systemImage: "folder")
+                        .frame(maxWidth: .infinity)
+                }
+                Button {
+                    store.importVideo()
+                } label: {
+                    Label("Import Video", systemImage: "plus")
+                        .frame(maxWidth: .infinity)
+                }
             }
             .padding(10)
+            .buttonStyle(.bordered)
             Spacer()
         }
     }
@@ -567,7 +726,7 @@ private struct PlaybackPreviewPane: View {
                             playbackSyncOffsetSeconds: store.selectedClip().map { store.effectivePlaybackSyncOffsetSeconds(for: $0) } ?? 0,
                             playheadSeconds: 0,
                             isPlaying: false,
-                            framing: store.selectedClip()?.framing ?? ClipFraming()
+                            framing: store.selectedClip()?.automatedFraming(atTimelineSecond: playheadSeconds) ?? ClipFraming()
                         )
                         .frame(width: previewSize.width, height: previewSize.height)
                         .allowsHitTesting(false)
@@ -675,13 +834,13 @@ private struct PlaybackCanvasView: View {
                 playbackSyncOffsetSeconds: playbackSyncOffsetSeconds,
                 playheadSeconds: playheadSeconds,
                 isPlaying: isPlaying,
-                framing: liveFraming
+                framing: displayedFraming
             )
             .frame(width: previewSize.width, height: previewSize.height)
             .allowsHitTesting(false)
             CanvasCropOverlay(
                 clip: clip,
-                framing: liveFraming,
+                framing: displayedFraming,
                 panReferenceSize: previewSize,
                 canvasPixelSize: canvasPixelSize,
                 onFramingChanged: { framing in
@@ -690,16 +849,21 @@ private struct PlaybackCanvasView: View {
                 },
                 onFramingCommitted: { framing in
                     liveFraming = framing
-                    pendingCommittedFraming = framing
-                    store.updateSelectedClipFraming(
-                        zoom: framing.zoom,
-                        offsetX: framing.offsetX,
-                        offsetY: framing.offsetY,
-                        rotationDegrees: framing.rotationDegrees,
-                        trackUndo: true,
-                        save: true,
-                        origin: .canvas
-                    )
+                    if clip.automationMarkers.isEmpty {
+                        pendingCommittedFraming = framing
+                        store.updateSelectedClipFraming(
+                            zoom: framing.zoom,
+                            offsetX: framing.offsetX,
+                            offsetY: framing.offsetY,
+                            rotationDegrees: framing.rotationDegrees,
+                            trackUndo: true,
+                            save: true,
+                            origin: .canvas
+                        )
+                    } else {
+                        pendingCommittedFraming = nil
+                        store.insertAutomationMarker(at: playheadSeconds, framing: framing)
+                    }
                     isManipulatingFraming = false
                 },
                 onCanvasPixelSizeChanged: onCanvasPixelSizeChanged,
@@ -750,6 +914,13 @@ private struct PlaybackCanvasView: View {
     private func syncLiveFramingFromProject() {
         liveClipId = clip.id
         liveFraming = store.selectedClip()?.framing ?? clip.framing ?? ClipFraming()
+    }
+
+    private var displayedFraming: ClipFraming {
+        if isManipulatingFraming {
+            return liveFraming
+        }
+        return clip.automatedFraming(atTimelineSecond: playheadSeconds)
     }
 
     private func framing(_ lhs: ClipFraming?, matches rhs: ClipFraming) -> Bool {
@@ -1039,6 +1210,7 @@ private struct InspectorPane: View {
     @State private var showCalibrationSection = true
     @State private var showAudioSection = false
     @State private var showClipSection = true
+    @State private var isInspectorFramingEditActive = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1055,22 +1227,31 @@ private struct InspectorPane: View {
                 }
 
                 DisclosureGroup("Tempo Grid", isExpanded: $showTempoSection) {
-                    TextField("Project tempo BPM", text: $tempoText)
-                        .focused($isTempoFieldFocused)
-                        .onSubmit {
+                    HStack(spacing: 8) {
+                        TextField("Tempo BPM", text: $tempoText)
+                            .frame(width: 84)
+                            .focused($isTempoFieldFocused)
+                            .onSubmit {
+                                saveTempo()
+                                isTempoFieldFocused = false
+                            }
+                        Stepper("Tempo", value: tempoStepperBinding, in: 20...300, step: 0.5)
+                            .labelsHidden()
+                        Button {
                             saveTempo()
                             isTempoFieldFocused = false
+                        } label: {
+                            Image(systemName: "checkmark")
                         }
-                    HStack {
-                        Button("Apply Tempo") {
-                            saveTempo()
-                            isTempoFieldFocused = false
-                        }
+                        .help("Apply tempo")
                         if let detectedTempo = syncEngine.detectedTempoBPM {
-                            Button("Use \(String(format: "%.1f", detectedTempo)) BPM") {
+                            Button {
                                 tempoText = String(format: "%.2f", detectedTempo)
                                 saveTempo()
+                            } label: {
+                                Label(String(format: "%.1f", detectedTempo), systemImage: "metronome")
                             }
+                            .help("Use detected MIDI clock tempo")
                         }
                     }
                     Picker("Grid", selection: gridDivisionBinding) {
@@ -1105,63 +1286,65 @@ private struct InspectorPane: View {
                 }
 
                 DisclosureGroup("Camera / Input", isExpanded: $showCameraSection) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Capture Source")
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
+                    Picker("Capture Source", selection: cameraSelection) {
                         ForEach(cameraEngine.availableDevices) { device in
-                            Button {
-                                selectCaptureSource(id: device.id, clearMedia: true)
-                            } label: {
-                                HStack {
-                                    Image(systemName: sourceIcon(for: device.kind))
-                                    Text(device.displayName)
-                                    Spacer()
-                                    if cameraEngine.selectedDeviceID == device.id {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
-                    Picker("Input", selection: cameraSelection) {
-                        ForEach(cameraEngine.availableDevices) { device in
-                            Text(device.displayName).tag(Optional(device.id))
+                            Label(device.displayName, systemImage: sourceIcon(for: device.kind))
+                                .tag(Optional(device.id))
                         }
                     }
                     HStack {
-                        Button("Refresh Cameras") {
+                        Button {
                             cameraEngine.refreshDevices()
                             if cameraEngine.isPreviewing {
                                 cameraEngine.startPreview()
                             }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.triangle.2.circlepath")
                         }
-                        Button(cameraEngine.isPreviewing ? "Restart Preview" : "Start Preview") {
+                        Button {
                             cameraEngine.startPreview()
+                        } label: {
+                            Label(cameraEngine.isPreviewing ? "Restart" : "Start", systemImage: "play.rectangle")
                         }
                     }
                     if cameraEngine.selectedDeviceID?.hasPrefix("screen:") == true || cameraEngine.selectedDeviceID?.hasPrefix("window:") == true {
                         HStack {
-                            Button("Show Region Box") {
+                            Button {
                                 captureRegionController.show()
+                            } label: {
+                                Label("Show Region", systemImage: "plus.viewfinder")
                             }
-                            Button("Hide Region Box") {
+                            Button {
+                                cameraEngine.setScreenCropRect(captureRegionController.captureRectForMainDisplay())
+                            } label: {
+                                Label("Apply", systemImage: "checkmark")
+                            }
+                            Button {
                                 captureRegionController.hide()
+                            } label: {
+                                Label("Hide", systemImage: "eye.slash")
                             }
                         }
                     }
-                    TextField("Latency ms", text: $latencyText)
-                        .onSubmit {
-                            saveLatency()
-                        }
-                    HStack {
-                        Button("Estimate") {
+                    HStack(spacing: 8) {
+                        TextField("Latency ms", text: $latencyText)
+                            .frame(width: 86)
+                            .onSubmit {
+                                saveLatency()
+                            }
+                        Stepper("Latency", value: latencyStepperBinding, in: 0...1000, step: 1)
+                            .labelsHidden()
+                        Button {
                             applyEstimatedLatency()
+                        } label: {
+                            Label("Estimate", systemImage: "timer")
                         }
-                        Button("Apply Latency") {
+                        Button {
                             saveLatency()
+                        } label: {
+                            Image(systemName: "checkmark")
                         }
+                        .help("Apply latency")
                     }
                     LabeledContent("Capture Delay", value: "\(store.captureLatencyMs(for: cameraEngine.selectedDeviceID)) ms")
                     VStack(alignment: .leading, spacing: 6) {
@@ -1186,16 +1369,26 @@ private struct InspectorPane: View {
                         Text("Playback Sync Offset")
                             .font(.caption.bold())
                             .foregroundStyle(.secondary)
-                        TextField("Playback sync seconds", text: $playbackSyncText)
-                        HStack {
-                            Button("Save for Input") {
+                        HStack(spacing: 8) {
+                            TextField("Sync seconds", text: $playbackSyncText)
+                                .frame(width: 96)
+                                .onSubmit { savePlaybackSyncOffset() }
+                            Stepper("Sync", value: playbackSyncStepperBinding, in: -2...2, step: 0.001)
+                                .labelsHidden()
+                            Button {
                                 savePlaybackSyncOffset()
+                            } label: {
+                                Label("Input", systemImage: "checkmark.circle")
                             }
-                            Button("App Default") {
+                            Button {
                                 savePlaybackSyncOffsetAsAppDefault()
+                            } label: {
+                                Label("Default", systemImage: "star")
                             }
-                            Button("Selected") {
+                            Button {
                                 applyPlaybackSyncOffsetToSelected()
+                            } label: {
+                                Label("Selected", systemImage: "scope")
                             }
                         }
                         HStack {
@@ -1227,12 +1420,18 @@ private struct InspectorPane: View {
                             saveAudioOffset()
                         }
                     HStack {
-                        Button("Apply Audio Offset") {
+                        Stepper("Audio Offset", value: audioOffsetStepperBinding, in: -30...30, step: 0.001)
+                            .labelsHidden()
+                        Button {
                             saveAudioOffset()
+                        } label: {
+                            Label("Apply", systemImage: "checkmark")
                         }
-                        Button("Reset") {
+                        Button {
                             audioOffsetText = formatSeconds(0)
                             saveAudioOffset()
+                        } label: {
+                            Label("Reset", systemImage: "arrow.counterclockwise")
                         }
                     }
                     Picker("Export Audio", selection: exportAudioModeBinding) {
@@ -1252,12 +1451,21 @@ private struct InspectorPane: View {
                     }
                     HStack {
                         TextField("Width px", text: $canvasWidthText)
+                            .frame(width: 84)
                             .onSubmit { saveCanvasSize() }
                         TextField("Height px", text: $canvasHeightText)
+                            .frame(width: 84)
                             .onSubmit { saveCanvasSize() }
-                        Button("Apply") {
+                        Stepper("W", value: canvasWidthStepperBinding, in: 320...7680, step: 16)
+                            .labelsHidden()
+                        Stepper("H", value: canvasHeightStepperBinding, in: 180...4320, step: 16)
+                            .labelsHidden()
+                        Button {
                             saveCanvasSize()
+                        } label: {
+                            Image(systemName: "checkmark")
                         }
+                        .help("Apply canvas size")
                     }
                     LabeledContent("Canvas Size", value: "\(store.project.exportSettings.canvasWidth ?? 1920)x\(store.project.exportSettings.canvasHeight ?? 1080)")
                     LabeledContent("Current Offset", value: "\(formatSeconds(store.project.audio.audioOffsetSeconds)) s")
@@ -1270,12 +1478,21 @@ private struct InspectorPane: View {
                         LabeledContent("Lane", value: clip.armedLaneId)
                         LabeledContent("Capture Delay", value: "\(clip.captureLatencyMs) ms")
                         LabeledContent("Playback Sync", value: String(format: "%.3f s", store.effectivePlaybackSyncOffsetSeconds(for: clip)))
+                        LabeledContent("Automation", value: "\(clip.automationMarkers.count) markers")
                         Slider(
                             value: Binding(
                                 get: { clip.framing?.zoom ?? 1 },
-                                set: { store.updateSelectedClipFraming(zoom: $0) }
+                                set: {
+                                    store.updateSelectedClipFraming(
+                                        zoom: $0,
+                                        trackUndo: false,
+                                        save: false,
+                                        origin: .inspector
+                                    )
+                                }
                             ),
-                            in: 0.25...16
+                            in: 0.25...16,
+                            onEditingChanged: handleFramingSliderEditingChanged
                         ) {
                             Text("Zoom")
                         }
@@ -1283,18 +1500,34 @@ private struct InspectorPane: View {
                         Slider(
                             value: Binding(
                                 get: { clip.framing?.offsetX ?? 0 },
-                                set: { store.updateSelectedClipFraming(offsetX: $0) }
+                                set: {
+                                    store.updateSelectedClipFraming(
+                                        offsetX: $0,
+                                        trackUndo: false,
+                                        save: false,
+                                        origin: .inspector
+                                    )
+                                }
                             ),
-                            in: -8...8
+                            in: -8...8,
+                            onEditingChanged: handleFramingSliderEditingChanged
                         ) {
                             Text("Pan X")
                         }
                         Slider(
                             value: Binding(
                                 get: { clip.framing?.offsetY ?? 0 },
-                                set: { store.updateSelectedClipFraming(offsetY: $0) }
+                                set: {
+                                    store.updateSelectedClipFraming(
+                                        offsetY: $0,
+                                        trackUndo: false,
+                                        save: false,
+                                        origin: .inspector
+                                    )
+                                }
                             ),
-                            in: -8...8
+                            in: -8...8,
+                            onEditingChanged: handleFramingSliderEditingChanged
                         ) {
                             Text("Pan Y")
                         }
@@ -1312,8 +1545,10 @@ private struct InspectorPane: View {
                             ),
                             in: -180...180,
                             onEditingChanged: { isEditing in
-                                if !isEditing {
-                                    saveCurrentSelectedClipRotation()
+                                if isEditing {
+                                    beginInspectorFramingEdit()
+                                } else {
+                                    normalizeAndCommitSelectedClipRotation()
                                 }
                             }
                         ) {
@@ -1331,6 +1566,34 @@ private struct InspectorPane: View {
                             }
                         }
                         LabeledContent("Rotate", value: String(format: "%.1f deg", clip.framing?.rotationDegrees ?? 0))
+                        if !clip.automationMarkers.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Automation Markers")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.secondary)
+                                ForEach(clip.automationMarkers.sorted { $0.timeSeconds < $1.timeSeconds }) { marker in
+                                    HStack {
+                                        Image(systemName: "flag.fill")
+                                            .foregroundStyle(.yellow)
+                                        Text(formatTimelineSeconds(clip.timelineStartSeconds + marker.timeSeconds, frameRate: clip.frameRate, format: store.clockDisplayFormat))
+                                            .font(.caption.monospacedDigit())
+                                        Spacer()
+                                        Button {
+                                            store.deleteAutomationMarker(marker.id, in: clip.id)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .help("Delete marker")
+                                    }
+                                }
+                                Button(role: .destructive) {
+                                    store.clearSelectedClipAutomation()
+                                } label: {
+                                    Label("Clear Markers", systemImage: "eraser")
+                                }
+                            }
+                        }
                         Button(role: .destructive) {
                             store.deleteSelectedClip()
                         } label: {
@@ -1340,6 +1603,10 @@ private struct InspectorPane: View {
                 }
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .controlSize(.small)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
             .onAppear {
                 latencyText = "\(store.captureLatencyMs(for: cameraEngine.selectedDeviceID))"
                 playbackSyncText = formatSeconds(store.defaultPlaybackSyncOffsetSeconds)
@@ -1379,6 +1646,68 @@ private struct InspectorPane: View {
                 if let newValue {
                     selectCaptureSource(id: newValue, clearMedia: false)
                 }
+            }
+        )
+    }
+
+    private var tempoStepperBinding: Binding<Double> {
+        Binding(
+            get: { store.tempoBPM },
+            set: { value in
+                let rounded = (value * 2).rounded() / 2
+                tempoText = formatTempo(rounded)
+                store.setTempoBPM(rounded)
+                syncEngine.setTempoBPM(rounded)
+            }
+        )
+    }
+
+    private var latencyStepperBinding: Binding<Double> {
+        Binding(
+            get: { Double(store.captureLatencyMs(for: cameraEngine.selectedDeviceID)) },
+            set: { value in
+                latencyText = "\(Int(value.rounded()))"
+                saveLatency()
+            }
+        )
+    }
+
+    private var playbackSyncStepperBinding: Binding<Double> {
+        Binding(
+            get: { playbackSyncValue() },
+            set: { value in
+                playbackSyncText = formatSeconds(value)
+                savePlaybackSyncOffset()
+            }
+        )
+    }
+
+    private var audioOffsetStepperBinding: Binding<Double> {
+        Binding(
+            get: { parseObservedSeconds(audioOffsetText) ?? store.project.audio.audioOffsetSeconds },
+            set: { value in
+                audioOffsetText = formatSeconds(value)
+                saveAudioOffset()
+            }
+        )
+    }
+
+    private var canvasWidthStepperBinding: Binding<Double> {
+        Binding(
+            get: { Double(store.project.exportSettings.canvasWidth ?? 1920) },
+            set: { value in
+                canvasWidthText = "\(Int(value.rounded()))"
+                saveCanvasSize()
+            }
+        )
+    }
+
+    private var canvasHeightStepperBinding: Binding<Double> {
+        Binding(
+            get: { Double(store.project.exportSettings.canvasHeight ?? 1080) },
+            set: { value in
+                canvasHeightText = "\(Int(value.rounded()))"
+                saveCanvasSize()
             }
         )
     }
@@ -1462,9 +1791,38 @@ private struct InspectorPane: View {
         store.updateSelectedClipFraming(rotationDegrees: normalized, trackUndo: true, save: true, origin: .inspector)
     }
 
-    private func saveCurrentSelectedClipRotation() {
+    private func normalizeAndCommitSelectedClipRotation() {
         let current = selectedClip?.framing?.rotationDegrees ?? 0
-        store.updateSelectedClipFraming(rotationDegrees: normalizeRotation(current), trackUndo: true, save: true, origin: .inspector)
+        store.updateSelectedClipFraming(
+            rotationDegrees: normalizeRotation(current),
+            trackUndo: false,
+            save: false,
+            origin: .inspector
+        )
+        commitInspectorFramingEdit()
+    }
+
+    private func handleFramingSliderEditingChanged(_ isEditing: Bool) {
+        if isEditing {
+            beginInspectorFramingEdit()
+        } else {
+            commitInspectorFramingEdit()
+        }
+    }
+
+    private func beginInspectorFramingEdit() {
+        guard !isInspectorFramingEditActive else { return }
+        isInspectorFramingEditActive = true
+        store.beginSelectedClipFramingEdit()
+    }
+
+    private func commitInspectorFramingEdit() {
+        guard isInspectorFramingEditActive else {
+            store.saveProject()
+            return
+        }
+        isInspectorFramingEditActive = false
+        store.saveProject()
     }
 
     private func applyEstimatedLatency() {
@@ -1602,13 +1960,13 @@ private struct TimelineView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                SectionHeader("Timeline")
-                Button {
+                Text("TIMELINE")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                SymbolToolButton(systemImage: "plus", help: "Add Camera Lane") {
                     store.addLane()
-                } label: {
-                    Label("Add Camera Lane", systemImage: "plus")
                 }
-                .padding(.trailing, 10)
+                .padding(.trailing, 6)
                 Slider(value: $timelineZoom, in: 4...48) {
                     Text("Zoom")
                 }
@@ -1618,22 +1976,45 @@ private struct TimelineView: View {
                     .foregroundStyle(.secondary)
                 Divider()
                     .frame(height: 18)
-                Button("Cut at Playhead") {
-                    store.cutSelectedClip(at: activePlayheadSeconds)
+                ControlGroup {
+                    Button {
+                        store.insertAutomationMarker(at: activePlayheadSeconds)
+                    } label: {
+                        Label("Marker", systemImage: "flag.fill")
+                    }
+                    .help("Insert automation marker at playhead")
+                    .disabled(!store.canInsertAutomationMarker(at: activePlayheadSeconds))
+                    SymbolToolButton(systemImage: "scissors", help: "Cut at Playhead") {
+                        store.cutSelectedClip(at: activePlayheadSeconds)
+                    }
+                    .disabled(store.selectedClip() == nil)
+                    SymbolToolButton(systemImage: "arrow.left.to.line.compact", help: "Snap Start") {
+                        store.snapSelectedClipStartToGrid()
+                    }
+                    .disabled(store.selectedClip() == nil)
+                    SymbolToolButton(systemImage: "arrow.right.to.line.compact", help: "Snap End") {
+                        store.snapSelectedClipEndToGrid()
+                    }
+                    .disabled(store.selectedClip() == nil)
+                    SymbolToolButton(systemImage: "trash", help: "Delete Region") {
+                        store.deleteSelectedClip()
+                    }
+                    .disabled(store.selectedClip() == nil)
                 }
-                .disabled(store.selectedClip() == nil)
-                Button("Snap Start") {
-                    store.snapSelectedClipStartToGrid()
+                .controlSize(.small)
+                Spacer()
+                Text(formatTimelineSeconds(activePlayheadSeconds, frameRate: store.project.frameRate, format: store.clockDisplayFormat))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background {
+                ZStack {
+                    Rectangle()
+                        .fill(.bar)
+                    Color.black.opacity(0.12)
                 }
-                .disabled(store.selectedClip() == nil)
-                Button("Snap End") {
-                    store.snapSelectedClipEndToGrid()
-                }
-                .disabled(store.selectedClip() == nil)
-                Button("Delete") {
-                    store.deleteSelectedClip()
-                }
-                .disabled(store.selectedClip() == nil)
             }
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1650,7 +2031,7 @@ private struct TimelineView: View {
                 }
                 .padding(.leading, 12)
                 .padding(.vertical, 12)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(.regularMaterial)
 
                 ScrollViewReader { proxy in
                     ScrollView([.horizontal, .vertical]) {
@@ -1664,14 +2045,16 @@ private struct TimelineView: View {
                                 ForEach(store.project.timeline.lanes) { lane in
                                     ZStack(alignment: .leading) {
                                         Rectangle()
-                                            .fill(lane.isArmed ? Color.red.opacity(0.11) : Color(nsColor: .controlBackgroundColor))
+                                            .fill(laneFill(for: lane))
                                             .frame(width: timelineWidth, height: 56)
                                             .overlay(alignment: .leading) {
                                                 timelineGrid(height: 56)
                                             }
+                                            .opacity(lane.isMuted ? 0.58 : 1)
                                         ForEach(lane.clips) { clip in
                                             ClipBlock(
                                                 clip: clip,
+                                                videoURL: videoURL(for: clip),
                                                 secondsToPixels: secondsToPixels,
                                                 isSelected: store.selectedClipId == clip.id,
                                                 onMove: { startSeconds in
@@ -1685,11 +2068,35 @@ private struct TimelineView: View {
                                                 }
                                             )
                                                 .offset(x: clip.timelineStartSeconds * secondsToPixels)
+                                                .opacity(lane.isMuted ? 0.55 : 1)
                                                 .onTapGesture {
                                                     store.selectedClipId = clip.id
                                                     store.selectedMediaAssetId = clip.mediaAssetId
                                                 }
                                                 .contextMenu {
+                                                    Button {
+                                                        store.selectedClipId = clip.id
+                                                        store.selectedMediaAssetId = clip.mediaAssetId
+                                                        store.insertAutomationMarker(at: activePlayheadSeconds)
+                                                    } label: {
+                                                        Label("Insert Automation Marker", systemImage: "flag.fill")
+                                                    }
+                                                    Button {
+                                                        store.selectedClipId = clip.id
+                                                        store.selectedMediaAssetId = clip.mediaAssetId
+                                                        store.deleteNearestAutomationMarker(at: activePlayheadSeconds)
+                                                    } label: {
+                                                        Label("Delete Nearest Marker", systemImage: "flag.slash")
+                                                    }
+                                                    .disabled(clip.automationMarkers.isEmpty)
+                                                    Button(role: .destructive) {
+                                                        store.selectedClipId = clip.id
+                                                        store.clearSelectedClipAutomation()
+                                                    } label: {
+                                                        Label("Clear Automation Markers", systemImage: "eraser")
+                                                    }
+                                                    .disabled(clip.automationMarkers.isEmpty)
+                                                    Divider()
                                                     Button(role: .destructive) {
                                                         store.deleteClip(clip.id)
                                                     } label: {
@@ -1704,7 +2111,7 @@ private struct TimelineView: View {
                                     }
                                 }
                                 Rectangle()
-                                    .fill(Color.blue.opacity(0.18))
+                                    .fill(Color.accentColor.opacity(0.12))
                                     .frame(width: timelineWidth, height: 34)
                                     .overlay(alignment: .leading) {
                                         HStack(spacing: 10) {
@@ -1730,12 +2137,14 @@ private struct TimelineView: View {
                                 .offset(x: activePlayheadSeconds * secondsToPixels, y: 12)
                         }
                     }
+                    .background(Color.black.opacity(0.28))
                     .onChange(of: Int(activePlayheadSeconds)) { second in
                         let anchor = max(0, (second / 5) * 5)
                         guard anchor != lastAutoScrollAnchor else { return }
                         lastAutoScrollAnchor = anchor
+                        guard let target = nearestLabelSecond(to: Double(anchor)) else { return }
                         withAnimation(.linear(duration: 0.12)) {
-                            proxy.scrollTo("time-\(anchor)", anchor: .center)
+                            proxy.scrollTo(target, anchor: .center)
                         }
                     }
                 }
@@ -1753,6 +2162,25 @@ private struct TimelineView: View {
 
     private var activePlayheadSeconds: Double {
         editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+    }
+
+    private func videoURL(for clip: VideoClip) -> URL? {
+        guard let asset = store.mediaAsset(for: clip),
+              let url = store.absoluteURL(for: asset),
+              FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        return url
+    }
+
+    private func laneFill(for lane: VideoLane) -> Color {
+        if lane.isArmed {
+            return Color.red.opacity(0.16)
+        }
+        if lane.isMuted {
+            return Color.black.opacity(0.30)
+        }
+        return Color.black.opacity(0.20)
     }
 
     private func seekTimelineIfEditing(locationX: CGFloat) {
@@ -1774,7 +2202,7 @@ private struct TimelineView: View {
     private var ruler: some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
-                .fill(Color(nsColor: .underPageBackgroundColor))
+                .fill(Color.black.opacity(0.26))
                 .frame(width: timelineWidth, height: 28)
             Canvas { context, size in
                 drawGridLines(context: &context, size: size, height: 28, includeMinorTicks: true)
@@ -1787,7 +2215,7 @@ private struct TimelineView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: labelWidth, height: 28, alignment: .topLeading)
                         .offset(x: CGFloat(seconds) * secondsToPixels)
-                        .id("time-\(Int(seconds))")
+                        .id(seconds)
                 }
             }
             .allowsHitTesting(false)
@@ -1825,6 +2253,12 @@ private struct TimelineView: View {
 
     private var labelWidth: CGFloat {
         max(90, CGFloat(labelStepSeconds) * secondsToPixels)
+    }
+
+    private func nearestLabelSecond(to seconds: Double) -> Double? {
+        labelSeconds.min { lhs, rhs in
+            abs(lhs - seconds) < abs(rhs - seconds)
+        }
     }
 
     private func isMajorGridLine(_ seconds: Double) -> Bool {
@@ -1878,9 +2312,9 @@ private struct LiveInputPreview: View {
             }
             HStack {
                 Circle()
-                    .fill(cameraEngine.isRecording ? .red : .green)
+                    .fill(cameraEngine.isRecording ? .red : (cameraEngine.isPreviewing ? .green : .secondary))
                     .frame(width: 8, height: 8)
-                Text(cameraEngine.isRecording ? "Marking take region" : "Live input")
+                Text(liveStatusText)
                     .font(.caption)
             }
             .padding(7)
@@ -1897,6 +2331,13 @@ private struct LiveInputPreview: View {
 
     private var usesRegionBox: Bool {
         cameraEngine.selectedDeviceID == "screen:region" || cameraEngine.selectedDeviceID?.hasPrefix("window:") == true
+    }
+
+    private var liveStatusText: String {
+        if cameraEngine.isRecording {
+            return "Recording buffer"
+        }
+        return cameraEngine.isPreviewing ? "Live input" : "Preview idle"
     }
 }
 
@@ -1936,6 +2377,11 @@ private final class PlaybackPlayerNSView: NSView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         configureLayers()
+    }
+
+    deinit {
+        player?.pause()
+        playerLayer.player = nil
     }
 
     private func configureLayers() {
@@ -2026,18 +2472,31 @@ private struct LaneHeader: View {
                 .textFieldStyle(.plain)
             HStack(spacing: 6) {
                 if lane.isArmed {
-                    Button("Armed") {
+                    Button {
                         store.armLane(lane.id)
+                    } label: {
+                        Label("Armed", systemImage: "record.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 } else {
-                    Button("Arm") {
+                    Button {
                         store.armLane(lane.id)
+                    } label: {
+                        Label("Arm", systemImage: "record.circle")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+                Button {
+                    store.toggleLaneMuted(lane.id)
+                } label: {
+                    Image(systemName: lane.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .frame(width: 16)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .help(lane.isMuted ? "Unmute lane" : "Mute lane")
                 Button {
                     store.deleteLane(lane.id)
                 } label: {
@@ -2114,17 +2573,37 @@ private struct PendingClipBlock: View {
 
 private struct ClipBlock: View {
     let clip: VideoClip
+    let videoURL: URL?
     let secondsToPixels: Double
     let isSelected: Bool
     let onMove: (Double) -> Void
     let onResizeStart: (Double) -> Void
     let onResizeEnd: (Double) -> Void
+    @State private var previewMoveSeconds: Double = 0
+    @State private var previewLeftDeltaSeconds: Double = 0
+    @State private var previewRightDeltaSeconds: Double = 0
 
     var body: some View {
-        let width = max(72, clip.durationSeconds * secondsToPixels)
+        let leftDelta = clampedLeftDelta(previewLeftDeltaSeconds)
+        let rightDelta = clampedRightDelta(previewRightDeltaSeconds, leftDelta: leftDelta)
+        let previewDuration = max(0.1, clip.durationSeconds - leftDelta + rightDelta)
+        let width = max(72, previewDuration * secondsToPixels)
         ZStack {
             RoundedRectangle(cornerRadius: 6)
-                .fill(clip.isEnabled ? Color.accentColor.opacity(0.75) : Color.gray.opacity(0.4))
+                .fill(Color.black.opacity(0.46))
+            if let videoURL {
+                TimelineClipFilmstripView(
+                    url: videoURL,
+                    trimInSeconds: max(0, clip.trimInSeconds),
+                    durationSeconds: previewDuration,
+                    width: width
+                )
+                .frame(width: width, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .opacity(clip.isEnabled ? 0.90 : 0.42)
+            }
+            RoundedRectangle(cornerRadius: 6)
+                .fill(clipOverlayColor(hasVideo: videoURL != nil))
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(isSelected ? Color.yellow : Color.clear, lineWidth: 3)
             HStack(spacing: 0) {
@@ -2135,9 +2614,13 @@ private struct ClipBlock: View {
                     .padding(.leading, 3)
                     .gesture(
                         DragGesture(minimumDistance: 2)
+                            .onChanged { value in
+                                previewLeftDeltaSeconds = clampedLeftDelta(seconds(for: value.translation.width))
+                            }
                             .onEnded { value in
-                                let deltaSeconds = value.translation.width / secondsToPixels
+                                let deltaSeconds = clampedLeftDelta(seconds(for: value.translation.width))
                                 onResizeStart(clip.timelineStartSeconds + deltaSeconds)
+                                previewLeftDeltaSeconds = 0
                             }
                     )
                 Rectangle()
@@ -2145,9 +2628,13 @@ private struct ClipBlock: View {
                     .frame(width: max(44, width - 24), height: 40)
                     .gesture(
                         DragGesture(minimumDistance: 2)
+                            .onChanged { value in
+                                previewMoveSeconds = clampedMoveDelta(seconds(for: value.translation.width))
+                            }
                             .onEnded { value in
-                                let deltaSeconds = value.translation.width / secondsToPixels
+                                let deltaSeconds = clampedMoveDelta(seconds(for: value.translation.width))
                                 onMove(max(0, clip.timelineStartSeconds + deltaSeconds))
+                                previewMoveSeconds = 0
                             }
                     )
                 Rectangle()
@@ -2157,9 +2644,13 @@ private struct ClipBlock: View {
                     .padding(.trailing, 3)
                     .gesture(
                         DragGesture(minimumDistance: 2)
+                            .onChanged { value in
+                                previewRightDeltaSeconds = clampedRightDelta(seconds(for: value.translation.width), leftDelta: leftDelta)
+                            }
                             .onEnded { value in
-                                let deltaSeconds = value.translation.width / secondsToPixels
+                                let deltaSeconds = clampedRightDelta(seconds(for: value.translation.width), leftDelta: leftDelta)
                                 onResizeEnd(clip.durationSeconds + deltaSeconds)
+                                previewRightDeltaSeconds = 0
                             }
                     )
             }
@@ -2172,10 +2663,228 @@ private struct ClipBlock: View {
                         .font(.caption2.monospacedDigit())
                 }
                 .lineLimit(1)
-                .padding(.horizontal, 6)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.28), radius: 1, x: 0, y: 1)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(.black.opacity(videoURL == nil ? 0.14 : 0.44), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            ForEach(visibleAutomationMarkers) { marker in
+                automationMarkerView
+                    .offset(x: markerX(for: marker, width: width) - width / 2)
+                    .allowsHitTesting(false)
             }
         }
         .frame(width: width, height: 40)
+        .offset(x: (previewMoveSeconds + leftDelta) * secondsToPixels)
+        .animation(.easeOut(duration: 0.08), value: previewMoveSeconds)
+        .animation(.easeOut(duration: 0.08), value: previewLeftDeltaSeconds)
+        .animation(.easeOut(duration: 0.08), value: previewRightDeltaSeconds)
+    }
+
+    private var visibleAutomationMarkers: [ClipAutomationMarker] {
+        clip.automationMarkers.filter { marker in
+            marker.timeSeconds >= 0 && marker.timeSeconds <= clip.durationSeconds
+        }
+    }
+
+    private func clipOverlayColor(hasVideo: Bool) -> Color {
+        if !clip.isEnabled {
+            return Color.gray.opacity(hasVideo ? 0.26 : 0.42)
+        }
+        return Color.accentColor.opacity(hasVideo ? 0.16 : 0.82)
+    }
+
+    private var automationMarkerView: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "flag.fill")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(.yellow, .black.opacity(0.72))
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .background(.black.opacity(0.58), in: Capsule())
+            Rectangle()
+                .fill(Color.yellow)
+                .frame(width: 3, height: 31)
+                .overlay {
+                    Rectangle()
+                        .stroke(Color.black.opacity(0.68), lineWidth: 1)
+                }
+        }
+        .shadow(color: .black.opacity(0.72), radius: 2, x: 0, y: 1)
+    }
+
+    private func markerX(for marker: ClipAutomationMarker, width: CGFloat) -> CGFloat {
+        let rawX = marker.timeSeconds * secondsToPixels
+        return min(max(12, rawX), max(12, width - 12))
+    }
+
+    private func seconds(for translationWidth: CGFloat) -> Double {
+        Double(translationWidth) / max(1, secondsToPixels)
+    }
+
+    private func clampedMoveDelta(_ seconds: Double) -> Double {
+        max(-clip.timelineStartSeconds, seconds)
+    }
+
+    private func clampedLeftDelta(_ seconds: Double) -> Double {
+        min(max(seconds, -clip.timelineStartSeconds), max(0, clip.durationSeconds - 0.1))
+    }
+
+    private func clampedRightDelta(_ seconds: Double, leftDelta: Double) -> Double {
+        max(seconds, -clip.durationSeconds + leftDelta + 0.1)
+    }
+}
+
+private struct TimelineClipFilmstripView: NSViewRepresentable {
+    let url: URL
+    let trimInSeconds: Double
+    let durationSeconds: Double
+    let width: CGFloat
+
+    func makeNSView(context: Context) -> TimelineClipFilmstripNSView {
+        TimelineClipFilmstripNSView()
+    }
+
+    func updateNSView(_ nsView: TimelineClipFilmstripNSView, context: Context) {
+        nsView.update(
+            url: url,
+            trimInSeconds: trimInSeconds,
+            durationSeconds: durationSeconds,
+            expectedWidth: width
+        )
+    }
+}
+
+private final class TimelineClipFilmstripNSView: NSView {
+    private static let renderQueue = DispatchQueue(label: "CamOrderStudio.timeline-filmstrip", qos: .userInitiated, attributes: .concurrent)
+    private static let cache = NSCache<NSString, TimelineClipFilmstripCacheEntry>()
+
+    private var requestKey: String?
+    private var images: [CGImage] = []
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    override func layout() {
+        super.layout()
+        render(images: images)
+    }
+
+    func update(url: URL, trimInSeconds: Double, durationSeconds: Double, expectedWidth: CGFloat) {
+        let sampleCount = Self.sampleCount(for: expectedWidth)
+        let key = Self.cacheKey(
+            url: url,
+            trimInSeconds: trimInSeconds,
+            durationSeconds: durationSeconds,
+            sampleCount: sampleCount
+        )
+        guard key != requestKey else { return }
+        requestKey = key
+
+        if let cached = Self.cache.object(forKey: key as NSString) {
+            images = cached.images
+            render(images: cached.images)
+            return
+        }
+
+        images = []
+        renderPlaceholder()
+
+        Self.renderQueue.async { [weak self] in
+            let generatedImages = Self.generateImages(
+                url: url,
+                trimInSeconds: trimInSeconds,
+                durationSeconds: durationSeconds,
+                sampleCount: sampleCount
+            )
+            Self.cache.setObject(TimelineClipFilmstripCacheEntry(images: generatedImages), forKey: key as NSString)
+            DispatchQueue.main.async {
+                guard let self, self.requestKey == key else { return }
+                self.images = generatedImages
+                self.render(images: generatedImages)
+            }
+        }
+    }
+
+    private func configure() {
+        wantsLayer = true
+        layer = CALayer()
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.36).cgColor
+        layer?.masksToBounds = true
+    }
+
+    private func render(images: [CGImage]) {
+        guard let layer else { return }
+        layer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        guard !images.isEmpty, bounds.width > 0, bounds.height > 0 else {
+            renderPlaceholder()
+            return
+        }
+
+        let tileWidth = bounds.width / CGFloat(images.count)
+        for (index, image) in images.enumerated() {
+            let imageLayer = CALayer()
+            imageLayer.contents = image
+            imageLayer.contentsGravity = .resizeAspectFill
+            imageLayer.masksToBounds = true
+            imageLayer.frame = CGRect(
+                x: CGFloat(index) * tileWidth,
+                y: 0,
+                width: tileWidth + 0.5,
+                height: bounds.height
+            )
+            layer.addSublayer(imageLayer)
+        }
+    }
+
+    private func renderPlaceholder() {
+        guard let layer else { return }
+        layer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        layer.backgroundColor = NSColor.black.withAlphaComponent(0.38).cgColor
+    }
+
+    private static func generateImages(url: URL, trimInSeconds: Double, durationSeconds: Double, sampleCount: Int) -> [CGImage] {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 180, height: 90)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.15, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.15, preferredTimescale: 600)
+
+        let count = max(1, sampleCount)
+        let duration = max(0.1, durationSeconds)
+        return (0..<count).compactMap { index in
+            let progress = count == 1 ? 0.5 : Double(index) / Double(count - 1)
+            let seconds = max(0, trimInSeconds + duration * progress)
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            return try? generator.copyCGImage(at: time, actualTime: nil)
+        }
+    }
+
+    private static func sampleCount(for width: CGFloat) -> Int {
+        min(12, max(1, Int((max(72, width) / 58).rounded(.up))))
+    }
+
+    private static func cacheKey(url: URL, trimInSeconds: Double, durationSeconds: Double, sampleCount: Int) -> String {
+        let trimKey = Int((trimInSeconds * 10).rounded())
+        let durationKey = Int((durationSeconds * 10).rounded())
+        return "\(url.path)|\(trimKey)|\(durationKey)|\(sampleCount)"
+    }
+}
+
+private final class TimelineClipFilmstripCacheEntry: NSObject {
+    let images: [CGImage]
+
+    init(images: [CGImage]) {
+        self.images = images
     }
 }
 
@@ -2193,7 +2902,13 @@ private struct SectionHeader: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .underPageBackgroundColor))
+            .background {
+                ZStack {
+                    Rectangle()
+                        .fill(.bar)
+                    Color.black.opacity(0.14)
+                }
+            }
     }
 }
 

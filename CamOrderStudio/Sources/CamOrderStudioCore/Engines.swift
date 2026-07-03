@@ -410,9 +410,6 @@ public final class CameraCaptureEngine: NSObject, ObservableObject, AVCaptureFil
             guard seenDeviceIds.insert(device.uniqueID).inserted else { return nil }
             return CameraDeviceInfo(id: device.uniqueID, displayName: device.localizedName, kind: .camera)
         }
-        for device in AVCaptureDevice.devices(for: .video) where seenDeviceIds.insert(device.uniqueID).inserted {
-            devices.append(CameraDeviceInfo(id: device.uniqueID, displayName: device.localizedName, kind: .camera))
-        }
         devices.append(CameraDeviceInfo(id: "screen:main", displayName: "Main Display Screen Capture", kind: .screen))
         devices.append(CameraDeviceInfo(id: "screen:all", displayName: "Whole Screen Capture", kind: .screen))
         devices.append(CameraDeviceInfo(id: "screen:region", displayName: "Custom Screen Region", kind: .screen))
@@ -752,13 +749,26 @@ public final class RenderExportEngine: ObservableObject {
             }
 
             let sourceSize = try await Self.displaySize(for: sourceTrack)
-            let transform = try await Self.transform(
+            let startTransform = try await Self.transform(
                 for: sourceTrack,
                 sourceSize: sourceSize,
                 renderSize: renderSize,
-                framing: segment.clip.framing ?? ClipFraming()
+                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds)
             )
-            layerInstruction.setTransform(transform, at: destinationTime)
+            let endTransform = try await Self.transform(
+                for: sourceTrack,
+                sourceSize: sourceSize,
+                renderSize: renderSize,
+                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds + segmentDurationSeconds)
+            )
+            layerInstruction.setTransformRamp(
+                fromStart: startTransform,
+                toEnd: endTransform,
+                timeRange: CMTimeRange(
+                    start: destinationTime,
+                    duration: CMTime(seconds: segmentDurationSeconds, preferredTimescale: 600)
+                )
+            )
             maxVideoEndSeconds = max(maxVideoEndSeconds, segment.startSeconds + segmentDurationSeconds)
         }
 
@@ -784,13 +794,14 @@ public final class RenderExportEngine: ObservableObject {
         exportSession.outputFileType = Self.outputFileType(for: project.exportSettings, destinationURL: destinationURL)
         exportSession.videoComposition = videoComposition
 
+        let exportSessionBox = ExportSessionBox(exportSession)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            exportSession.exportAsynchronously {
-                switch exportSession.status {
+            exportSessionBox.session.exportAsynchronously {
+                switch exportSessionBox.session.status {
                 case .completed:
                     continuation.resume()
                 case .failed, .cancelled:
-                    continuation.resume(throwing: exportSession.error ?? RenderExportError.exportFailed)
+                    continuation.resume(throwing: exportSessionBox.session.error ?? RenderExportError.exportFailed)
                 default:
                     continuation.resume(throwing: RenderExportError.exportFailed)
                 }
@@ -860,6 +871,29 @@ public final class RenderExportEngine: ObservableObject {
             for clip in lane.clips where clip.isEnabled {
                 boundaries.insert(clip.timelineStartSeconds)
                 boundaries.insert(clip.timelineStartSeconds + clip.durationSeconds)
+                for marker in clip.automationMarkers {
+                    let markerSeconds = clip.timelineStartSeconds + marker.timeSeconds
+                    if markerSeconds > clip.timelineStartSeconds,
+                       markerSeconds < clip.timelineStartSeconds + clip.durationSeconds {
+                        boundaries.insert(markerSeconds)
+                    }
+                }
+                let localAutomationTimes = ([0] + clip.automationMarkers.map(\.timeSeconds))
+                    .filter { $0.isFinite && $0 >= 0 && $0 <= clip.durationSeconds }
+                    .sorted()
+                let uniqueLocalAutomationTimes = localAutomationTimes.reduce(into: [Double]()) { result, seconds in
+                    guard result.last.map({ abs($0 - seconds) > 0.001 }) ?? true else { return }
+                    result.append(seconds)
+                }
+                for index in 0..<(max(0, uniqueLocalAutomationTimes.count - 1)) {
+                    let start = uniqueLocalAutomationTimes[index]
+                    let end = uniqueLocalAutomationTimes[index + 1]
+                    guard end - start > 0.25 else { continue }
+                    for step in 1..<8 {
+                        let progress = Double(step) / 8.0
+                        boundaries.insert(clip.timelineStartSeconds + start + (end - start) * progress)
+                    }
+                }
             }
         }
         let sortedBoundaries = boundaries.filter { $0.isFinite && $0 >= 0 }.sorted()
@@ -925,6 +959,14 @@ private struct RenderSegment {
     var clip: VideoClip
     var startSeconds: Double
     var durationSeconds: Double
+}
+
+private final class ExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+
+    init(_ session: AVAssetExportSession) {
+        self.session = session
+    }
 }
 
 public enum RenderExportError: LocalizedError {

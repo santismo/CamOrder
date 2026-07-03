@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import CamOrderStudioCore
 import UniformTypeIdentifiers
 
@@ -277,7 +278,7 @@ final class ProjectStore: ObservableObject {
     }
 
     func importVideo() {
-        guard var document else {
+        guard document != nil else {
             createProject()
             guard self.document != nil else { return }
             importVideo()
@@ -293,6 +294,14 @@ final class ProjectStore: ObservableObject {
 
         guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
 
+        Task {
+            await importVideoFile(from: sourceURL)
+        }
+    }
+
+    private func importVideoFile(from sourceURL: URL) async {
+        guard var document else { return }
+
         do {
             let videoFolder = document.folderURL.appendingPathComponent("media/video")
             try FileManager.default.createDirectory(at: videoFolder, withIntermediateDirectories: true)
@@ -300,7 +309,7 @@ final class ProjectStore: ObservableObject {
             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
 
             let relativePath = "media/video/\(destinationURL.lastPathComponent)"
-            let duration: Double? = nil
+            let duration = await videoDurationSeconds(for: destinationURL)
             let mediaAsset = MediaAsset(
                 kind: .video,
                 displayName: sourceURL.deletingPathExtension().lastPathComponent,
@@ -426,6 +435,15 @@ final class ProjectStore: ObservableObject {
             self.selectedClipId = nil
             self.selectedMediaAssetId = nil
         }
+        self.document = document
+        saveProject()
+    }
+
+    func toggleLaneMuted(_ laneId: String) {
+        guard var document else { return }
+        guard let index = document.project.timeline.lanes.firstIndex(where: { $0.id == laneId }) else { return }
+        registerUndo(project: document.project)
+        document.project.timeline.lanes[index].isMuted.toggle()
         self.document = document
         saveProject()
     }
@@ -689,6 +707,11 @@ final class ProjectStore: ObservableObject {
         saveProject()
     }
 
+    func beginSelectedClipFramingEdit() {
+        guard let document, selectedClip() != nil else { return }
+        registerUndo(project: document.project)
+    }
+
     func updateSelectedClipFraming(zoom: Double? = nil, offsetX: Double? = nil, offsetY: Double? = nil, rotationDegrees: Double? = nil, trackUndo: Bool = true, save: Bool = false, origin: FramingEditOrigin = .inspector) {
         guard let selectedClipId else { return }
         guard var document else { return }
@@ -865,7 +888,21 @@ final class ProjectStore: ObservableObject {
             registerUndo(project: document.project)
             let firstDuration = seconds - clip.timelineStartSeconds
             let secondDuration = clip.durationSeconds - firstDuration
+            let firstAutomationMarkers = clip.automationMarkers
+                .filter { $0.timeSeconds <= firstDuration }
+                .sorted { $0.timeSeconds < $1.timeSeconds }
+            let secondAutomationMarkers = clip.automationMarkers
+                .filter { $0.timeSeconds >= firstDuration }
+                .map { marker in
+                    ClipAutomationMarker(
+                        id: marker.id,
+                        timeSeconds: max(0, marker.timeSeconds - firstDuration),
+                        framing: marker.framing
+                    )
+                }
+                .sorted { $0.timeSeconds < $1.timeSeconds }
             document.project.timeline.lanes[laneIndex].clips[clipIndex].durationSeconds = firstDuration
+            document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers = firstAutomationMarkers
 
             var secondClip = clip
             secondClip.id = UUID().uuidString
@@ -874,9 +911,91 @@ final class ProjectStore: ObservableObject {
             secondClip.logicStartSeconds = seconds
             secondClip.logicStartTimecode = Timecode.from(seconds: seconds, frameRate: clip.frameRate)
             secondClip.durationSeconds = secondDuration
+            secondClip.automationMarkers = secondAutomationMarkers
             document.project.timeline.lanes[laneIndex].clips.insert(secondClip, at: clipIndex + 1)
             self.selectedClipId = secondClip.id
             selectedMediaAssetId = secondClip.mediaAssetId
+            self.document = document
+            saveProject()
+            return
+        }
+    }
+
+    func canInsertAutomationMarker(at timelineSeconds: Double) -> Bool {
+        automationClipLocation(at: timelineSeconds) != nil
+    }
+
+    func insertAutomationMarker(at timelineSeconds: Double, framing explicitFraming: ClipFraming? = nil) {
+        guard var document else { return }
+        guard let location = automationClipLocation(at: timelineSeconds, in: document.project) else {
+            lastError = "Select a region or place the playhead over a region before inserting an automation marker."
+            return
+        }
+
+        registerUndo(project: document.project)
+        var clip = document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex]
+        let localSeconds = min(max(0, timelineSeconds - clip.timelineStartSeconds), clip.durationSeconds)
+        let markerFraming = explicitFraming ?? clip.automatedFraming(atLocalSecond: localSeconds)
+        let tolerance = max(0.02, 0.5 / max(1, clip.frameRate.framesPerSecond))
+        if let markerIndex = clip.automationMarkers.firstIndex(where: { abs($0.timeSeconds - localSeconds) <= tolerance }) {
+            clip.automationMarkers[markerIndex].timeSeconds = localSeconds
+            clip.automationMarkers[markerIndex].framing = markerFraming
+        } else {
+            clip.automationMarkers.append(
+                ClipAutomationMarker(timeSeconds: localSeconds, framing: markerFraming)
+            )
+        }
+        clip.automationMarkers.sort { $0.timeSeconds < $1.timeSeconds }
+        document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex] = clip
+        self.document = document
+        selectedClipId = clip.id
+        selectedMediaAssetId = clip.mediaAssetId
+        saveProject()
+    }
+
+    func deleteNearestAutomationMarker(at timelineSeconds: Double) {
+        guard var document else { return }
+        guard let location = automationClipLocation(at: timelineSeconds, in: document.project) else { return }
+        var clip = document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex]
+        guard !clip.automationMarkers.isEmpty else { return }
+        let localSeconds = min(max(0, timelineSeconds - clip.timelineStartSeconds), clip.durationSeconds)
+        guard let markerIndex = clip.automationMarkers.indices.min(by: {
+            abs(clip.automationMarkers[$0].timeSeconds - localSeconds) < abs(clip.automationMarkers[$1].timeSeconds - localSeconds)
+        }) else {
+            return
+        }
+        registerUndo(project: document.project)
+        clip.automationMarkers.remove(at: markerIndex)
+        document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex] = clip
+        self.document = document
+        saveProject()
+    }
+
+    func deleteAutomationMarker(_ markerId: String, in clipId: String) {
+        guard var document else { return }
+        for laneIndex in document.project.timeline.lanes.indices {
+            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == clipId }) else {
+                continue
+            }
+            guard document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.contains(where: { $0.id == markerId }) else { return }
+            registerUndo(project: document.project)
+            document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.removeAll { $0.id == markerId }
+            self.document = document
+            saveProject()
+            return
+        }
+    }
+
+    func clearSelectedClipAutomation() {
+        guard let selectedClipId else { return }
+        guard var document else { return }
+        for laneIndex in document.project.timeline.lanes.indices {
+            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == selectedClipId }) else {
+                continue
+            }
+            guard !document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.isEmpty else { return }
+            registerUndo(project: document.project)
+            document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.removeAll()
             self.document = document
             saveProject()
             return
@@ -1113,6 +1232,45 @@ final class ProjectStore: ObservableObject {
             suffix += 1
         }
         return candidate
+    }
+
+    private struct ClipLocation {
+        var laneIndex: Int
+        var clipIndex: Int
+    }
+
+    private func automationClipLocation(at timelineSeconds: Double) -> ClipLocation? {
+        automationClipLocation(at: timelineSeconds, in: project)
+    }
+
+    private func automationClipLocation(at timelineSeconds: Double, in project: CamOrderProject) -> ClipLocation? {
+        if let selectedClipId {
+            for laneIndex in project.timeline.lanes.indices {
+                if let clipIndex = project.timeline.lanes[laneIndex].clips.firstIndex(where: { clip in
+                    clip.id == selectedClipId && clip.containsTimelineSecond(timelineSeconds)
+                }) {
+                    return ClipLocation(laneIndex: laneIndex, clipIndex: clipIndex)
+                }
+            }
+        }
+
+        for laneIndex in project.timeline.lanes.indices where !project.timeline.lanes[laneIndex].isMuted {
+            if let clipIndex = project.timeline.lanes[laneIndex].clips.lastIndex(where: { clip in
+                clip.isEnabled && clip.containsTimelineSecond(timelineSeconds)
+            }) {
+                return ClipLocation(laneIndex: laneIndex, clipIndex: clipIndex)
+            }
+        }
+
+        return nil
+    }
+
+    private func videoDurationSeconds(for url: URL) async -> Double? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration) else { return nil }
+        let seconds = duration.seconds
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        return seconds
     }
 }
 

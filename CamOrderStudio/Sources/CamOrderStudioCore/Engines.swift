@@ -749,13 +749,26 @@ public final class RenderExportEngine: ObservableObject {
             }
 
             let sourceSize = try await Self.displaySize(for: sourceTrack)
-            let transform = try await Self.transform(
+            let startTransform = try await Self.transform(
                 for: sourceTrack,
                 sourceSize: sourceSize,
                 renderSize: renderSize,
-                framing: segment.clip.framing ?? ClipFraming()
+                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds)
             )
-            layerInstruction.setTransform(transform, at: destinationTime)
+            let endTransform = try await Self.transform(
+                for: sourceTrack,
+                sourceSize: sourceSize,
+                renderSize: renderSize,
+                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds + segmentDurationSeconds)
+            )
+            layerInstruction.setTransformRamp(
+                fromStart: startTransform,
+                toEnd: endTransform,
+                timeRange: CMTimeRange(
+                    start: destinationTime,
+                    duration: CMTime(seconds: segmentDurationSeconds, preferredTimescale: 600)
+                )
+            )
             maxVideoEndSeconds = max(maxVideoEndSeconds, segment.startSeconds + segmentDurationSeconds)
         }
 
@@ -858,6 +871,13 @@ public final class RenderExportEngine: ObservableObject {
             for clip in lane.clips where clip.isEnabled {
                 boundaries.insert(clip.timelineStartSeconds)
                 boundaries.insert(clip.timelineStartSeconds + clip.durationSeconds)
+                for marker in clip.automationMarkers {
+                    let markerSeconds = clip.timelineStartSeconds + marker.timeSeconds
+                    if markerSeconds > clip.timelineStartSeconds,
+                       markerSeconds < clip.timelineStartSeconds + clip.durationSeconds {
+                        boundaries.insert(markerSeconds)
+                    }
+                }
             }
         }
         let sortedBoundaries = boundaries.filter { $0.isFinite && $0 >= 0 }.sorted()

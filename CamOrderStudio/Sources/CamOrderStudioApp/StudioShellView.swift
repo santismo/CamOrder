@@ -187,6 +187,14 @@ struct StudioShellView: View {
             return true
         }
 
+        if !modifierFlags.contains(.command),
+           !modifierFlags.contains(.option),
+           !modifierFlags.contains(.control),
+           event.charactersIgnoringModifiers?.lowercased() == "m" {
+            store.insertAutomationMarker(at: activePlayheadSeconds)
+            return true
+        }
+
         guard editPlayback.isEditMode else { return false }
 
         switch event.keyCode {
@@ -212,15 +220,21 @@ struct StudioShellView: View {
             return false
         }
     }
+
+    private var activePlayheadSeconds: Double {
+        editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+    }
 }
 
 private struct StudioWindowBackground: View {
     var body: some View {
         ZStack {
             Rectangle()
-                .fill(.regularMaterial)
+                .fill(.ultraThinMaterial)
             Color(nsColor: .underPageBackgroundColor)
-                .opacity(0.52)
+                .opacity(0.74)
+            Color.black
+                .opacity(0.30)
         }
         .ignoresSafeArea()
     }
@@ -235,7 +249,13 @@ private struct StudioPanel<Content: View>: View {
 
     var body: some View {
         content
-            .background(.regularMaterial)
+            .background {
+                ZStack {
+                    Rectangle()
+                        .fill(.regularMaterial)
+                    Color.black.opacity(0.22)
+                }
+            }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -274,9 +294,11 @@ private struct SymbolToolButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 13, weight: .semibold))
-                .frame(width: 24, height: 22)
+                .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .help(help)
     }
 }
@@ -429,7 +451,13 @@ private struct TransportSyncBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background {
+            ZStack {
+                Rectangle()
+                    .fill(.bar)
+                Color.black.opacity(0.12)
+            }
+        }
         .onAppear {
             startArmedBufferIfNeeded()
         }
@@ -698,7 +726,7 @@ private struct PlaybackPreviewPane: View {
                             playbackSyncOffsetSeconds: store.selectedClip().map { store.effectivePlaybackSyncOffsetSeconds(for: $0) } ?? 0,
                             playheadSeconds: 0,
                             isPlaying: false,
-                            framing: store.selectedClip()?.framing ?? ClipFraming()
+                            framing: store.selectedClip()?.automatedFraming(atTimelineSecond: playheadSeconds) ?? ClipFraming()
                         )
                         .frame(width: previewSize.width, height: previewSize.height)
                         .allowsHitTesting(false)
@@ -806,13 +834,13 @@ private struct PlaybackCanvasView: View {
                 playbackSyncOffsetSeconds: playbackSyncOffsetSeconds,
                 playheadSeconds: playheadSeconds,
                 isPlaying: isPlaying,
-                framing: liveFraming
+                framing: displayedFraming
             )
             .frame(width: previewSize.width, height: previewSize.height)
             .allowsHitTesting(false)
             CanvasCropOverlay(
                 clip: clip,
-                framing: liveFraming,
+                framing: displayedFraming,
                 panReferenceSize: previewSize,
                 canvasPixelSize: canvasPixelSize,
                 onFramingChanged: { framing in
@@ -881,6 +909,13 @@ private struct PlaybackCanvasView: View {
     private func syncLiveFramingFromProject() {
         liveClipId = clip.id
         liveFraming = store.selectedClip()?.framing ?? clip.framing ?? ClipFraming()
+    }
+
+    private var displayedFraming: ClipFraming {
+        if isManipulatingFraming {
+            return liveFraming
+        }
+        return clip.automatedFraming(atTimelineSecond: playheadSeconds)
     }
 
     private func framing(_ lhs: ClipFraming?, matches rhs: ClipFraming) -> Bool {
@@ -1438,6 +1473,7 @@ private struct InspectorPane: View {
                         LabeledContent("Lane", value: clip.armedLaneId)
                         LabeledContent("Capture Delay", value: "\(clip.captureLatencyMs) ms")
                         LabeledContent("Playback Sync", value: String(format: "%.3f s", store.effectivePlaybackSyncOffsetSeconds(for: clip)))
+                        LabeledContent("Automation", value: "\(clip.automationMarkers.count) markers")
                         Slider(
                             value: Binding(
                                 get: { clip.framing?.zoom ?? 1 },
@@ -1525,6 +1561,34 @@ private struct InspectorPane: View {
                             }
                         }
                         LabeledContent("Rotate", value: String(format: "%.1f deg", clip.framing?.rotationDegrees ?? 0))
+                        if !clip.automationMarkers.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Automation Markers")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.secondary)
+                                ForEach(clip.automationMarkers.sorted { $0.timeSeconds < $1.timeSeconds }) { marker in
+                                    HStack {
+                                        Image(systemName: "flag.fill")
+                                            .foregroundStyle(.yellow)
+                                        Text(formatTimelineSeconds(clip.timelineStartSeconds + marker.timeSeconds, frameRate: clip.frameRate, format: store.clockDisplayFormat))
+                                            .font(.caption.monospacedDigit())
+                                        Spacer()
+                                        Button {
+                                            store.deleteAutomationMarker(marker.id, in: clip.id)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .help("Delete marker")
+                                    }
+                                }
+                                Button(role: .destructive) {
+                                    store.clearSelectedClipAutomation()
+                                } label: {
+                                    Label("Clear Markers", systemImage: "eraser")
+                                }
+                            }
+                        }
                         Button(role: .destructive) {
                             store.deleteSelectedClip()
                         } label: {
@@ -1908,6 +1972,13 @@ private struct TimelineView: View {
                 Divider()
                     .frame(height: 18)
                 ControlGroup {
+                    Button {
+                        store.insertAutomationMarker(at: activePlayheadSeconds)
+                    } label: {
+                        Label("Marker", systemImage: "flag.fill")
+                    }
+                    .help("Insert automation marker at playhead")
+                    .disabled(!store.canInsertAutomationMarker(at: activePlayheadSeconds))
                     SymbolToolButton(systemImage: "scissors", help: "Cut at Playhead") {
                         store.cutSelectedClip(at: activePlayheadSeconds)
                     }
@@ -1933,7 +2004,13 @@ private struct TimelineView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(.bar)
+            .background {
+                ZStack {
+                    Rectangle()
+                        .fill(.bar)
+                    Color.black.opacity(0.12)
+                }
+            }
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Timecode")
@@ -1991,6 +2068,29 @@ private struct TimelineView: View {
                                                     store.selectedMediaAssetId = clip.mediaAssetId
                                                 }
                                                 .contextMenu {
+                                                    Button {
+                                                        store.selectedClipId = clip.id
+                                                        store.selectedMediaAssetId = clip.mediaAssetId
+                                                        store.insertAutomationMarker(at: activePlayheadSeconds)
+                                                    } label: {
+                                                        Label("Insert Automation Marker", systemImage: "flag.fill")
+                                                    }
+                                                    Button {
+                                                        store.selectedClipId = clip.id
+                                                        store.selectedMediaAssetId = clip.mediaAssetId
+                                                        store.deleteNearestAutomationMarker(at: activePlayheadSeconds)
+                                                    } label: {
+                                                        Label("Delete Nearest Marker", systemImage: "flag.slash")
+                                                    }
+                                                    .disabled(clip.automationMarkers.isEmpty)
+                                                    Button(role: .destructive) {
+                                                        store.selectedClipId = clip.id
+                                                        store.clearSelectedClipAutomation()
+                                                    } label: {
+                                                        Label("Clear Automation Markers", systemImage: "eraser")
+                                                    }
+                                                    .disabled(clip.automationMarkers.isEmpty)
+                                                    Divider()
                                                     Button(role: .destructive) {
                                                         store.deleteClip(clip.id)
                                                     } label: {
@@ -2031,7 +2131,7 @@ private struct TimelineView: View {
                                 .offset(x: activePlayheadSeconds * secondsToPixels, y: 12)
                         }
                     }
-                    .background(Color(nsColor: .textBackgroundColor).opacity(0.20))
+                    .background(Color.black.opacity(0.28))
                     .onChange(of: Int(activePlayheadSeconds)) { second in
                         let anchor = max(0, (second / 5) * 5)
                         guard anchor != lastAutoScrollAnchor else { return }
@@ -2060,12 +2160,12 @@ private struct TimelineView: View {
 
     private func laneFill(for lane: VideoLane) -> Color {
         if lane.isArmed {
-            return Color.red.opacity(0.12)
+            return Color.red.opacity(0.16)
         }
         if lane.isMuted {
-            return Color(nsColor: .controlBackgroundColor).opacity(0.55)
+            return Color.black.opacity(0.30)
         }
-        return Color(nsColor: .controlBackgroundColor)
+        return Color.black.opacity(0.20)
     }
 
     private func seekTimelineIfEditing(locationX: CGFloat) {
@@ -2087,7 +2187,7 @@ private struct TimelineView: View {
     private var ruler: some View {
         ZStack(alignment: .topLeading) {
             Rectangle()
-                .fill(Color(nsColor: .underPageBackgroundColor))
+                .fill(Color.black.opacity(0.26))
                 .frame(width: timelineWidth, height: 28)
             Canvas { context, size in
                 drawGridLines(context: &context, size: size, height: 28, includeMinorTicks: true)
@@ -2477,6 +2577,11 @@ private struct ClipBlock: View {
                 .fill(clip.isEnabled ? Color.accentColor.opacity(0.82) : Color.gray.opacity(0.42))
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(isSelected ? Color.yellow : Color.clear, lineWidth: 3)
+            ForEach(visibleAutomationMarkers) { marker in
+                automationMarkerView
+                    .offset(x: marker.timeSeconds * secondsToPixels - width / 2)
+                    .allowsHitTesting(false)
+            }
             HStack(spacing: 0) {
                 Rectangle()
                     .fill(Color.white.opacity(0.45))
@@ -2546,6 +2651,24 @@ private struct ClipBlock: View {
         .animation(.easeOut(duration: 0.08), value: previewRightDeltaSeconds)
     }
 
+    private var visibleAutomationMarkers: [ClipAutomationMarker] {
+        clip.automationMarkers.filter { marker in
+            marker.timeSeconds >= 0 && marker.timeSeconds <= clip.durationSeconds
+        }
+    }
+
+    private var automationMarkerView: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "flag.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.yellow)
+            Rectangle()
+                .fill(Color.yellow.opacity(0.92))
+                .frame(width: 2, height: 31)
+        }
+        .shadow(color: .black.opacity(0.45), radius: 1, x: 0, y: 1)
+    }
+
     private func seconds(for translationWidth: CGFloat) -> Double {
         Double(translationWidth) / max(1, secondsToPixels)
     }
@@ -2577,7 +2700,13 @@ private struct SectionHeader: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.bar)
+            .background {
+                ZStack {
+                    Rectangle()
+                        .fill(.bar)
+                    Color.black.opacity(0.14)
+                }
+            }
     }
 }
 

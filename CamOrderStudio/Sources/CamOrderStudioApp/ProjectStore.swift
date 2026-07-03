@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import CamOrderStudioCore
 import UniformTypeIdentifiers
 
@@ -277,7 +278,7 @@ final class ProjectStore: ObservableObject {
     }
 
     func importVideo() {
-        guard var document else {
+        guard document != nil else {
             createProject()
             guard self.document != nil else { return }
             importVideo()
@@ -293,6 +294,14 @@ final class ProjectStore: ObservableObject {
 
         guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
 
+        Task {
+            await importVideoFile(from: sourceURL)
+        }
+    }
+
+    private func importVideoFile(from sourceURL: URL) async {
+        guard var document else { return }
+
         do {
             let videoFolder = document.folderURL.appendingPathComponent("media/video")
             try FileManager.default.createDirectory(at: videoFolder, withIntermediateDirectories: true)
@@ -300,7 +309,7 @@ final class ProjectStore: ObservableObject {
             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
 
             let relativePath = "media/video/\(destinationURL.lastPathComponent)"
-            let duration: Double? = nil
+            let duration = await videoDurationSeconds(for: destinationURL)
             let mediaAsset = MediaAsset(
                 kind: .video,
                 displayName: sourceURL.deletingPathExtension().lastPathComponent,
@@ -426,6 +435,15 @@ final class ProjectStore: ObservableObject {
             self.selectedClipId = nil
             self.selectedMediaAssetId = nil
         }
+        self.document = document
+        saveProject()
+    }
+
+    func toggleLaneMuted(_ laneId: String) {
+        guard var document else { return }
+        guard let index = document.project.timeline.lanes.firstIndex(where: { $0.id == laneId }) else { return }
+        registerUndo(project: document.project)
+        document.project.timeline.lanes[index].isMuted.toggle()
         self.document = document
         saveProject()
     }
@@ -687,6 +705,11 @@ final class ProjectStore: ObservableObject {
         selectedMediaAssetId = mediaAsset.id
         selectedClipId = clip.id
         saveProject()
+    }
+
+    func beginSelectedClipFramingEdit() {
+        guard let document, selectedClip() != nil else { return }
+        registerUndo(project: document.project)
     }
 
     func updateSelectedClipFraming(zoom: Double? = nil, offsetX: Double? = nil, offsetY: Double? = nil, rotationDegrees: Double? = nil, trackUndo: Bool = true, save: Bool = false, origin: FramingEditOrigin = .inspector) {
@@ -1113,6 +1136,14 @@ final class ProjectStore: ObservableObject {
             suffix += 1
         }
         return candidate
+    }
+
+    private func videoDurationSeconds(for url: URL) async -> Double? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration) else { return nil }
+        let seconds = duration.seconds
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        return seconds
     }
 }
 

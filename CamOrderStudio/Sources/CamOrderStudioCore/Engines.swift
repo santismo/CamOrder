@@ -410,9 +410,6 @@ public final class CameraCaptureEngine: NSObject, ObservableObject, AVCaptureFil
             guard seenDeviceIds.insert(device.uniqueID).inserted else { return nil }
             return CameraDeviceInfo(id: device.uniqueID, displayName: device.localizedName, kind: .camera)
         }
-        for device in AVCaptureDevice.devices(for: .video) where seenDeviceIds.insert(device.uniqueID).inserted {
-            devices.append(CameraDeviceInfo(id: device.uniqueID, displayName: device.localizedName, kind: .camera))
-        }
         devices.append(CameraDeviceInfo(id: "screen:main", displayName: "Main Display Screen Capture", kind: .screen))
         devices.append(CameraDeviceInfo(id: "screen:all", displayName: "Whole Screen Capture", kind: .screen))
         devices.append(CameraDeviceInfo(id: "screen:region", displayName: "Custom Screen Region", kind: .screen))
@@ -784,13 +781,14 @@ public final class RenderExportEngine: ObservableObject {
         exportSession.outputFileType = Self.outputFileType(for: project.exportSettings, destinationURL: destinationURL)
         exportSession.videoComposition = videoComposition
 
+        let exportSessionBox = ExportSessionBox(exportSession)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            exportSession.exportAsynchronously {
-                switch exportSession.status {
+            exportSessionBox.session.exportAsynchronously {
+                switch exportSessionBox.session.status {
                 case .completed:
                     continuation.resume()
                 case .failed, .cancelled:
-                    continuation.resume(throwing: exportSession.error ?? RenderExportError.exportFailed)
+                    continuation.resume(throwing: exportSessionBox.session.error ?? RenderExportError.exportFailed)
                 default:
                     continuation.resume(throwing: RenderExportError.exportFailed)
                 }
@@ -925,6 +923,14 @@ private struct RenderSegment {
     var clip: VideoClip
     var startSeconds: Double
     var durationSeconds: Double
+}
+
+private final class ExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+
+    init(_ session: AVAssetExportSession) {
+        self.session = session
+    }
 }
 
 public enum RenderExportError: LocalizedError {

@@ -1,63 +1,57 @@
-## CamOrder Workflow (Quick Start)
+# CamOrder Studio
 
-0) Install FFmpeg (required for the convert script):
-   - If you already have FFmpeg, skip this step.
-   - On macOS with Homebrew:
-     - `brew install ffmpeg`
-     - verify: `ffmpeg -version`
-   - If `brew` is not installed yet, install Homebrew first (brew.sh), then run the command above.
+**Record and edit video inside Logic Pro. One Audio FX plug-in on Stereo Out.**
 
-1) Open https://santismo.github.io/CamOrder/ in Chrome. (relies on Chrome functions) 
-2) Click **Choose Project Folder** and select your project folder.
-3) Enable MIDI + Camera, arm the recorder, and record your takes.
-4) Click **Export Resolve Package** (this writes:
-   - `media/*.webm`
-   - `media/camorder-stacked-mov.fcpxml`
-   - `convert-to-mov.sh`
-)
+CamOrder Studio follows Logic's transport, records cameras or your screen into video lanes, and lets you trim, frame and export a movie from the same session. Your audio passes through unchanged.
 
-### Convert WebM -> MOV
-5) In Finder, right‑click the **project folder** → **New Terminal at Folder**.
-6) Run:
+[Download CamOrder Studio AU 0.4.0](https://github.com/santismo/CamOrder/releases/tag/au-v0.4.0) · [User guide](CamOrderStudio/README-AU.md) · [Application & plug-in history](docs/HISTORY.md)
 
-sh convert-to-mov.sh
+> **Development build:** the download is for **Intel Macs, macOS 13+**, and is locally signed, not notarized. Apple silicon builds can be made from source but are not included or validated in this release. Physical camera combinations and real-session sync need checking on your setup.
 
-(This creates `.mov` files and deletes the original `.webm`.)
+![CamOrder Studio's dark editor with Main Stage, four input tiles and video lanes](docs/images/camorder-studio-au.png)
 
-### Import into DaVinci Resolve
-7) Open Resolve and create/open a project.
-8) Import media:
-- **File → Import → Media…** (Command+I)
-- Select the `media` folder and import the `.mov` files.
-9) Import the FCPXML:
-- **File → Import → Timeline → Import AAF/EDL/XML…** (Shift+Command+I)
-- Choose `media/camorder-stacked-mov.fcpxml`
-10) If Resolve can’t find clips:
-- Add your project folder to **Media Storage**, then re‑import the FCPXML.
+*Actual 0.4.0 editor in a native Audio Unit test host, using simulated cameras and test footage. Logic supplies its own surrounding window controls.*
 
-## CamOrder Studio Native App
+## Start recording in Logic
 
-The native macOS app scaffold lives in `CamOrderStudio/` and is separate from the existing browser workflow.
+1. Download and unzip the release, then run **Install CamOrder Studio.command**. Fully quit and reopen Logic after an update.
+2. On **Stereo Out**, insert **Audio FX → Audio Units → Santismo → CamOrder Studio → Stereo**. Use one instance for the project.
+3. Create a CamOrder project beside your Logic project and choose the **Default** source under **Live Inputs**. Allow camera or screen access for the included **CamOrder Capture** helper.
+4. **Arm** a CamOrder lane, then press **Play or Record in Logic**. Also arm a Logic audio track when recording audio. Video keeps recording while you work in Logic's timeline or close the plug-in editor.
+5. Stop Logic to finish the take. Edit your regions and **Export** a MOV or MP4.
 
-Build and test:
+Normal Stereo Out operation uses Logic's Audio Unit transport: no MIDI, MTC or timecode-audio routing is required. See the [guide](CamOrderStudio/README-AU.md) for permissions, transport fallback and troubleshooting.
+
+## One camera or several
+
+Every lane starts with the shared **Default** input. Assign another source to a lane when you want another angle; each distinct source gets its own preview. Start with three lanes and add more as needed. Lanes sharing one source share its camera connection and recording file.
+
+Webcams, macOS-exposed iPhone/Continuity Camera inputs, and main-display screen or region capture are supported. Four simultaneous synthetic inputs were verified; physical capacity depends on the devices, USB bandwidth and Mac.
+
+## Edit and export
+
+- A dark, freely resizable editor with adjustable Main Stage, Live Inputs and timeline panels. Inspector, Media and Sync controls open when needed.
+- Split, trim, move and frame clips, with framing animation and filmstrip thumbnails. The top visible region determines Main Stage playback and export.
+- Non-destructive lane and project sync adjustments, starting at **0 ms**, applied to playback and export.
+- Export the edited timeline, selected region's range, time from the playhead, project origin or a custom range. Trimmed source frames and adjusted positions are preserved.
+- A placement note accompanies the movie. Import it into Logic's movie track and place it at the noted start; movie import and positioning are manual.
+
+Camera takes contain video only. Import a bounced master if you want audio in the exported movie; the plug-in does not capture Logic's mix.
+
+## Build and verify
+
+Requires Xcode and its command-line tools. Apple's AudioUnitSDK is included with its license and pinned revision.
 
 ```sh
 cd CamOrderStudio
+Scripts/build-au.sh
 swift test
+Scripts/test-au.sh
+Scripts/test-session.sh
+Scripts/install-au.sh
+auval -v aufx CmSt Sntm
 ```
 
-Run the SwiftUI app from source:
+Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.4.0.md) for the tests and their limits.
 
-```sh
-cd CamOrderStudio
-swift run CamOrderStudio
-```
-
-Install it as a macOS app in `/Applications`:
-
-```sh
-cd CamOrderStudio
-Scripts/install-camorder-studio.sh
-```
-
-In the app, create a `.camorderstudio` project folder, import a video file, and select it in the Media / Takes list to preview it. Logic sync, camera recording, mastered-audio import, and render export are scaffolded for follow-up milestones.
+CamOrder is [MIT licensed](LICENSE). The vendored AudioUnitSDK has its [own license](CamOrderStudio/Vendor/AudioUnitSDK/LICENSE.txt).

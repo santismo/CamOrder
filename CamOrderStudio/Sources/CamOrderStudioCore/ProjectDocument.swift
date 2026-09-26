@@ -27,6 +27,9 @@ public struct ProjectDocument {
     }
 
     public static func create(at folderURL: URL, project: CamOrderProject) throws -> ProjectDocument {
+        guard !FileManager.default.fileExists(atPath: folderURL.appendingPathComponent(projectFileName).path) else {
+            throw CocoaError(.fileWriteFileExists, userInfo: [NSLocalizedDescriptionKey: "A CamOrder project already exists here. Open it or choose a new folder."])
+        }
         try createFolderStructure(at: folderURL)
         let document = ProjectDocument(folderURL: folderURL, project: project)
         try document.save()

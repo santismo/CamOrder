@@ -11,6 +11,7 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
     public var audio: MasterAudio
     public var captureLatencyProfiles: [CaptureLatencyProfile]
     public var exportSettings: ExportSettings
+    public var defaultCaptureSourceID: String?
 
     public init(
         projectVersion: Int = 1,
@@ -22,7 +23,8 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
         sync: SyncSettings = SyncSettings(),
         audio: MasterAudio = MasterAudio(),
         captureLatencyProfiles: [CaptureLatencyProfile] = [],
-        exportSettings: ExportSettings = ExportSettings()
+        exportSettings: ExportSettings = ExportSettings(),
+        defaultCaptureSourceID: String? = nil
     ) {
         self.projectVersion = projectVersion
         self.name = name
@@ -34,6 +36,7 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
         self.audio = audio
         self.captureLatencyProfiles = captureLatencyProfiles
         self.exportSettings = exportSettings
+        self.defaultCaptureSourceID = defaultCaptureSourceID
     }
 
     public static func empty(name: String = "Untitled CamOrder Studio Project") -> CamOrderProject {
@@ -41,7 +44,8 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
             name: name,
             timeline: Timeline(lanes: [
                 VideoLane(id: "lane_1", name: "Lane 1"),
-                VideoLane(id: "lane_2", name: "Lane 2")
+                VideoLane(id: "lane_2", name: "Lane 2"),
+                VideoLane(id: "lane_3", name: "Lane 3")
             ])
         )
     }
@@ -105,13 +109,21 @@ public struct VideoLane: Codable, Equatable, Identifiable, Sendable {
     public var isArmed: Bool
     public var isMuted: Bool
     public var clips: [VideoClip]
+    public var videoOffsetMS: Double?
+    public var captureSourceID: String?
+    public var captureSourceName: String?
+    public var captureCrop: [Double]?
 
-    public init(id: String = UUID().uuidString, name: String, isArmed: Bool = false, isMuted: Bool = false, clips: [VideoClip] = []) {
+    public init(id: String = UUID().uuidString, name: String, isArmed: Bool = false, isMuted: Bool = false, clips: [VideoClip] = [], videoOffsetMS: Double? = nil, captureSourceID: String? = nil, captureSourceName: String? = nil, captureCrop: [Double]? = nil) {
         self.id = id
         self.name = name
         self.isArmed = isArmed
         self.isMuted = isMuted
         self.clips = clips
+        self.videoOffsetMS = videoOffsetMS
+        self.captureSourceID = captureSourceID
+        self.captureSourceName = captureSourceName
+        self.captureCrop = captureCrop
     }
 }
 
@@ -135,6 +147,7 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
     public var isEnabled: Bool
     public var framing: ClipFraming?
     public var playbackSyncOffsetSeconds: Double?
+    public var automationMarkers: [ClipAutomationMarker]
 
     public init(
         id: String = UUID().uuidString,
@@ -155,7 +168,8 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         trimOutSeconds: Double? = nil,
         isEnabled: Bool = true,
         framing: ClipFraming? = nil,
-        playbackSyncOffsetSeconds: Double? = nil
+        playbackSyncOffsetSeconds: Double? = nil,
+        automationMarkers: [ClipAutomationMarker] = []
     ) {
         self.id = id
         self.clipId = clipId
@@ -176,10 +190,94 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         self.isEnabled = isEnabled
         self.framing = framing
         self.playbackSyncOffsetSeconds = playbackSyncOffsetSeconds
+        self.automationMarkers = automationMarkers
     }
 
     public static func timelineStart(logicStartSeconds: Double, captureLatencyMs: Int) -> Double {
         max(0, logicStartSeconds + (Double(captureLatencyMs) / 1000.0))
+    }
+
+    public func automatedFraming(atTimelineSecond seconds: Double) -> ClipFraming {
+        automatedFraming(atLocalSecond: seconds - timelineStartSeconds)
+    }
+
+    public func automatedFraming(atLocalSecond seconds: Double) -> ClipFraming {
+        let baseFraming = framing ?? ClipFraming()
+        let markers = automationMarkers
+            .filter { $0.timeSeconds.isFinite }
+            .sorted { $0.timeSeconds < $1.timeSeconds }
+        guard !markers.isEmpty else { return baseFraming }
+        guard let first = markers.first, let last = markers.last else { return baseFraming }
+
+        if seconds <= first.timeSeconds {
+            if first.timeSeconds > 0 {
+                let progress = max(0, min(1, seconds / max(0.001, first.timeSeconds)))
+                return ClipFraming.interpolate(from: baseFraming, to: first.framing, progress: progress)
+            }
+            return first.framing
+        }
+
+        if seconds >= last.timeSeconds {
+            return last.framing
+        }
+
+        for index in 0..<(markers.count - 1) {
+            let start = markers[index]
+            let end = markers[index + 1]
+            guard seconds >= start.timeSeconds, seconds <= end.timeSeconds else { continue }
+            let progress = (seconds - start.timeSeconds) / max(0.001, end.timeSeconds - start.timeSeconds)
+            return ClipFraming.interpolate(from: start.framing, to: end.framing, progress: progress)
+        }
+
+        return baseFraming
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case clipId
+        case mediaAssetId
+        case videoFile
+        case armedLaneId
+        case logicStartTimecode
+        case logicStartSeconds
+        case timelineStartSeconds
+        case appCaptureStartHostTime
+        case captureLatencyMs
+        case durationSeconds
+        case frameRate
+        case cameraDeviceId
+        case droppedFrameWarnings
+        case trimInSeconds
+        case trimOutSeconds
+        case isEnabled
+        case framing
+        case playbackSyncOffsetSeconds
+        case automationMarkers
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        clipId = try container.decode(String.self, forKey: .clipId)
+        mediaAssetId = try container.decode(String.self, forKey: .mediaAssetId)
+        videoFile = try container.decode(String.self, forKey: .videoFile)
+        armedLaneId = try container.decode(String.self, forKey: .armedLaneId)
+        logicStartTimecode = try container.decode(Timecode.self, forKey: .logicStartTimecode)
+        logicStartSeconds = try container.decode(Double.self, forKey: .logicStartSeconds)
+        appCaptureStartHostTime = try container.decodeIfPresent(UInt64.self, forKey: .appCaptureStartHostTime)
+        captureLatencyMs = try container.decodeIfPresent(Int.self, forKey: .captureLatencyMs) ?? 0
+        timelineStartSeconds = try container.decodeIfPresent(Double.self, forKey: .timelineStartSeconds)
+            ?? Self.timelineStart(logicStartSeconds: logicStartSeconds, captureLatencyMs: captureLatencyMs)
+        durationSeconds = try container.decode(Double.self, forKey: .durationSeconds)
+        frameRate = try container.decode(FrameRate.self, forKey: .frameRate)
+        cameraDeviceId = try container.decodeIfPresent(String.self, forKey: .cameraDeviceId)
+        droppedFrameWarnings = try container.decodeIfPresent([String].self, forKey: .droppedFrameWarnings) ?? []
+        trimInSeconds = try container.decodeIfPresent(Double.self, forKey: .trimInSeconds) ?? 0
+        trimOutSeconds = try container.decodeIfPresent(Double.self, forKey: .trimOutSeconds)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        framing = try container.decodeIfPresent(ClipFraming.self, forKey: .framing)
+        playbackSyncOffsetSeconds = try container.decodeIfPresent(Double.self, forKey: .playbackSyncOffsetSeconds)
+        automationMarkers = try container.decodeIfPresent([ClipAutomationMarker].self, forKey: .automationMarkers) ?? []
     }
 }
 
@@ -209,6 +307,44 @@ public struct ClipFraming: Codable, Equatable, Sendable {
         offsetX = try container.decodeIfPresent(Double.self, forKey: .offsetX) ?? 0
         offsetY = try container.decodeIfPresent(Double.self, forKey: .offsetY) ?? 0
         rotationDegrees = try container.decodeIfPresent(Double.self, forKey: .rotationDegrees) ?? 0
+    }
+
+    public static func interpolate(from start: ClipFraming, to end: ClipFraming, progress: Double) -> ClipFraming {
+        let clampedProgress = max(0, min(1, progress))
+        let easedProgress = clampedProgress * clampedProgress * (3 - 2 * clampedProgress)
+        return ClipFraming(
+            zoom: interpolate(start.zoom, end.zoom, easedProgress),
+            offsetX: interpolate(start.offsetX, end.offsetX, easedProgress),
+            offsetY: interpolate(start.offsetY, end.offsetY, easedProgress),
+            rotationDegrees: interpolateRotation(start.rotationDegrees, end.rotationDegrees, easedProgress)
+        )
+    }
+
+    private static func interpolate(_ start: Double, _ end: Double, _ progress: Double) -> Double {
+        start + (end - start) * progress
+    }
+
+    private static func interpolateRotation(_ start: Double, _ end: Double, _ progress: Double) -> Double {
+        var delta = (end - start).truncatingRemainder(dividingBy: 360)
+        if delta > 180 {
+            delta -= 360
+        }
+        if delta < -180 {
+            delta += 360
+        }
+        return start + delta * progress
+    }
+}
+
+public struct ClipAutomationMarker: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var timeSeconds: Double
+    public var framing: ClipFraming
+
+    public init(id: String = UUID().uuidString, timeSeconds: Double, framing: ClipFraming) {
+        self.id = id
+        self.timeSeconds = max(0, timeSeconds)
+        self.framing = framing
     }
 }
 
@@ -270,8 +406,9 @@ public struct SyncSettings: Codable, Equatable, Sendable {
     public var clockDisplayFormat: ClockDisplayFormat?
     public var subtractSMPTEHourOffset: Bool?
     public var defaultPlaybackSyncOffsetSeconds: Double?
+    public var videoOffsetMS: Double?
 
-    public init(mode: SyncMode = .mtc, frameRate: FrameRate = .fps30, lastKnownTimecode: Timecode? = nil, state: LogicSyncState = .disconnected, clockDisplayFormat: ClockDisplayFormat? = .logicTime, subtractSMPTEHourOffset: Bool? = true, defaultPlaybackSyncOffsetSeconds: Double? = 0.333) {
+    public init(mode: SyncMode = .mtc, frameRate: FrameRate = .fps30, lastKnownTimecode: Timecode? = nil, state: LogicSyncState = .disconnected, clockDisplayFormat: ClockDisplayFormat? = .logicTime, subtractSMPTEHourOffset: Bool? = true, defaultPlaybackSyncOffsetSeconds: Double? = 0) {
         self.mode = mode
         self.frameRate = frameRate
         self.lastKnownTimecode = lastKnownTimecode ?? Timecode(hours: 0, minutes: 0, seconds: 0, frames: 0, frameRate: frameRate)
@@ -377,9 +514,9 @@ public enum ExportAudioMode: String, Codable, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .masteredOnly: return "Mastered audio only"
-        case .cameraOnly: return "Camera audio only"
-        case .masteredAndCamera: return "Mastered + camera audio"
-        case .muteAll: return "Mute all"
+        case .cameraOnly: return "Imported clip audio"
+        case .masteredAndCamera: return "Mastered + imported clip audio"
+        case .muteAll: return "Silent movie (for Logic)"
         }
     }
 }
@@ -392,7 +529,7 @@ public struct ExportSettings: Codable, Equatable, Sendable {
     public var canvasWidth: Int?
     public var canvasHeight: Int?
 
-    public init(container: ExportContainer = .mov, resolution: ExportResolution = .hd1080, frameRate: FrameRate = .fps30, audioMode: ExportAudioMode = .masteredOnly, canvasWidth: Int? = 1920, canvasHeight: Int? = 1080) {
+    public init(container: ExportContainer = .mov, resolution: ExportResolution = .hd1080, frameRate: FrameRate = .fps30, audioMode: ExportAudioMode = .muteAll, canvasWidth: Int? = 1920, canvasHeight: Int? = 1080) {
         self.container = container
         self.resolution = resolution
         self.frameRate = frameRate

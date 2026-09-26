@@ -26,7 +26,8 @@ final class CaptureRegionController: NSObject, ObservableObject {
     func captureRectForMainDisplay() -> CGRect? {
         guard let panel else { return nil }
         guard let contentView = panel.contentView else { return nil }
-        guard let screen = panel.screen ?? NSScreen.main else { return nil }
+        guard let screen = panel.screen,
+              (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == CGMainDisplayID() else { return nil }
         let screenFrame = screen.frame
         let contentBounds = contentView.bounds.insetBy(dx: 8, dy: 8)
         let windowRect = contentView.convert(contentBounds, to: nil)
@@ -44,7 +45,7 @@ final class CaptureRegionController: NSObject, ObservableObject {
     }
 
     private func makePanel() -> NSPanel {
-        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 100, y: 100, width: 1280, height: 720)
+        let screenFrame = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == CGMainDisplayID() })?.visibleFrame ?? NSRect(x: 100, y: 100, width: 1280, height: 720)
         let initialFrame = NSRect(
             x: screenFrame.midX - 320,
             y: screenFrame.midY - 180,

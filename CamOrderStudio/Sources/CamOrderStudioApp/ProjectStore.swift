@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import CamOrderStudioCore
 import UniformTypeIdentifiers
 
@@ -15,13 +16,36 @@ final class ProjectStore: ObservableObject {
         var revision: Int
     }
 
+    var isHosted = false
+    var onDocumentChange: (() -> Void)?
+    @Published var lastExportURL: URL?
     @Published var document: ProjectDocument?
     @Published var selectedMediaAssetId: String?
     @Published var selectedClipId: String?
     @Published var lastError: String?
-    @Published var pendingTake: PendingTakeRegion?
+    @Published var pendingTakes: [String: PendingTakeRegion] = [:]
+    @Published var captureEndSeconds: [String: Double] = [:]
+    @Published var armedBuffers: [String: ArmedCaptureBuffer] = [:]
+    weak var captureInputs: LaneCaptureInputs?
+    var requiresLaneSource = false
+    var pendingTake: PendingTakeRegion? {
+        get { project.timeline.lanes.compactMap { pendingTakes[$0.id] }.first }
+        set {
+            if let value = newValue { pendingTakes[value.laneId] = value }
+            else if let value = pendingTake { pendingTakes[value.laneId] = nil }
+        }
+    }
+    var armedBuffer: ArmedCaptureBuffer? {
+        get { project.timeline.lanes.compactMap { armedBuffers[$0.id] }.first }
+        set {
+            if let value = newValue { armedBuffers[value.laneId] = value }
+            else if let value = armedBuffer { armedBuffers[value.laneId] = nil }
+        }
+    }
+    var hasCaptureActivity: Bool { !pendingTakes.isEmpty || !armedBuffers.isEmpty }
+    func laneIsBusy(_ id: String) -> Bool { pendingTakes[id] != nil || armedBuffers[id] != nil }
+
     @Published var pendingStopTimecode: Timecode?
-    @Published var armedBuffer: ArmedCaptureBuffer?
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
     @Published private(set) var latestFramingEdit: FramingEditEvent?
@@ -139,7 +163,7 @@ final class ProjectStore: ObservableObject {
     }
 
     var defaultPlaybackSyncOffsetSeconds: Double {
-        project.sync.defaultPlaybackSyncOffsetSeconds ?? 0.333
+        project.sync.defaultPlaybackSyncOffsetSeconds ?? 0
     }
 
     var armedLaneName: String? {
@@ -186,6 +210,7 @@ final class ProjectStore: ObservableObject {
             selectedClipId = nil
             lastError = nil
             clearHistory()
+            onDocumentChange?()
         } catch {
             lastError = error.localizedDescription
         }
@@ -201,11 +226,14 @@ final class ProjectStore: ObservableObject {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            document = try ProjectDocument.open(at: url)
+            var opened = try ProjectDocument.open(at: url)
+            for index in opened.project.timeline.lanes.indices { opened.project.timeline.lanes[index].isArmed = false }
+            document = opened
             selectedMediaAssetId = document?.project.media.first(where: { $0.kind == .video })?.id
             selectedClipId = nil
             lastError = nil
             clearHistory()
+            onDocumentChange?()
         } catch {
             lastError = error.localizedDescription
         }
@@ -215,6 +243,7 @@ final class ProjectStore: ObservableObject {
         guard let document else { return }
         do {
             try document.save()
+            onDocumentChange?()
             lastError = nil
         } catch {
             lastError = error.localizedDescription
@@ -222,6 +251,10 @@ final class ProjectStore: ObservableObject {
     }
 
     func saveProjectAs() {
+        guard !hasCaptureActivity, !hasArmedLane else {
+            lastError = "Stop recording and disarm the input before saving a copy."
+            return
+        }
         guard let document else {
             createProject()
             return
@@ -237,8 +270,11 @@ final class ProjectStore: ObservableObject {
         guard panel.runModal() == .OK, let destinationURL = panel.url else { return }
 
         do {
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try FileManager.default.removeItem(at: destinationURL)
+            guard destinationURL.standardizedFileURL != document.folderURL.standardizedFileURL,
+                  !destinationURL.standardizedFileURL.path.hasPrefix(document.folderURL.standardizedFileURL.path + "/"),
+                  !FileManager.default.fileExists(atPath: destinationURL.path) else {
+                lastError = "Choose a new, empty project location. Existing projects will not be replaced."
+                return
             }
             try FileManager.default.copyItem(at: document.folderURL, to: destinationURL)
             var copiedDocument = try ProjectDocument.open(at: destinationURL)
@@ -247,12 +283,69 @@ final class ProjectStore: ObservableObject {
             self.document = copiedDocument
             lastError = nil
             clearHistory()
+            onDocumentChange?()
         } catch {
             lastError = error.localizedDescription
         }
     }
 
+    func cancelPendingTake(message: String? = nil, laneID: String? = nil) {
+        if let id = laneID ?? pendingTake?.laneId ?? armedBuffer?.laneId ?? armedLaneId {
+            pendingTakes[id] = nil
+            armedBuffers[id] = nil
+            disarmLane(id)
+        }
+        pendingStopTimecode = nil
+        if let message { lastError = message }
+    }
+
+    func disarmLane(_ id: String) {
+        guard var document, let index = document.project.timeline.lanes.firstIndex(where: { $0.id == id }), document.project.timeline.lanes[index].isArmed else { return }
+        document.project.timeline.lanes[index].isArmed = false
+        self.document = document
+        saveProject()
+    }
+
+    func setLaneCaptureSource(_ id: String, sourceID: String?, name: String? = nil) {
+        guard var document, let index = document.project.timeline.lanes.firstIndex(where: { $0.id == id }) else { return }
+        guard !document.project.timeline.lanes[index].isArmed, !laneIsBusy(id) else {
+            lastError = "Disarm this lane and wait for its take to finish before changing its input."
+            return
+        }
+        registerUndo(project: document.project)
+        document.project.timeline.lanes[index].captureSourceID = sourceID
+        document.project.timeline.lanes[index].captureSourceName = sourceID == nil ? nil : name
+        self.document = document
+        saveProject()
+        captureInputs?.reconcile()
+    }
+
+    func setDefaultCaptureSource(_ sourceID: String?) {
+        guard var document else { return }
+        guard !document.project.timeline.lanes.contains(where: { $0.captureSourceID == nil && ($0.isArmed || laneIsBusy($0.id)) }) else {
+            lastError = "Disarm the lanes using the default input and wait for their takes to finish before changing it."
+            return
+        }
+        registerUndo(project: document.project)
+        document.project.defaultCaptureSourceID = sourceID
+        self.document = document
+        saveProject()
+        captureInputs?.reconcile()
+    }
+
+    func setLaneCaptureCrop(_ id: String, rect: CGRect?) {
+        guard var document, let index = document.project.timeline.lanes.firstIndex(where: { $0.id == id }), !laneIsBusy(id) else { return }
+        document.project.timeline.lanes[index].captureCrop = rect.map { [$0.minX, $0.minY, $0.width, $0.height] }
+        self.document = document
+        saveProject()
+        captureInputs?.reconcile()
+    }
+
     private func confirmClosingCurrentProject() -> Bool {
+        guard !hasCaptureActivity, !hasArmedLane else {
+            lastError = "Stop recording and disarm the input before switching projects."
+            return false
+        }
         guard let document else { return true }
         let hasWork = !document.project.timeline.lanes.flatMap(\.clips).isEmpty ||
             document.project.audio.masteredAudioFile != nil ||
@@ -277,7 +370,7 @@ final class ProjectStore: ObservableObject {
     }
 
     func importVideo() {
-        guard var document else {
+        guard document != nil else {
             createProject()
             guard self.document != nil else { return }
             importVideo()
@@ -293,6 +386,14 @@ final class ProjectStore: ObservableObject {
 
         guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
 
+        Task {
+            await importVideoFile(from: sourceURL)
+        }
+    }
+
+    private func importVideoFile(from sourceURL: URL) async {
+        guard var document else { return }
+
         do {
             let videoFolder = document.folderURL.appendingPathComponent("media/video")
             try FileManager.default.createDirectory(at: videoFolder, withIntermediateDirectories: true)
@@ -300,7 +401,7 @@ final class ProjectStore: ObservableObject {
             try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
 
             let relativePath = "media/video/\(destinationURL.lastPathComponent)"
-            let duration: Double? = nil
+            let duration = await videoDurationSeconds(for: destinationURL)
             let mediaAsset = MediaAsset(
                 kind: .video,
                 displayName: sourceURL.deletingPathExtension().lastPathComponent,
@@ -313,9 +414,9 @@ final class ProjectStore: ObservableObject {
             document.project.media.append(mediaAsset)
             ensureAtLeastOneLane(project: &document.project)
             let laneId = document.project.timeline.lanes[0].id
-            let clipNumber = document.project.timeline.lanes.flatMap(\.clips).count + 1
+            let takeID = "import_" + UUID().uuidString
             let clip = VideoClip(
-                clipId: String(format: "take_%03d", clipNumber),
+                clipId: takeID,
                 mediaAssetId: mediaAsset.id,
                 videoFile: relativePath,
                 armedLaneId: laneId,
@@ -379,13 +480,21 @@ final class ProjectStore: ObservableObject {
     }
 
     func armLane(_ laneId: String) {
-        var project = project
-        registerUndo(project: project)
-        let shouldUnarm = project.timeline.lanes.first(where: { $0.id == laneId })?.isArmed == true
-        for index in project.timeline.lanes.indices {
-            project.timeline.lanes[index].isArmed = shouldUnarm ? false : project.timeline.lanes[index].id == laneId
+        guard var document, let target = document.project.timeline.lanes.firstIndex(where: { $0.id == laneId }) else { return }
+        let shouldUnarm = document.project.timeline.lanes[target].isArmed
+        if !shouldUnarm, pendingTakes[laneId] != nil {
+            lastError = "This lane is still finishing a take. Stop the other lanes sharing its input before rearming it."
+            return
         }
-        self.project = project
+        if !shouldUnarm, requiresLaneSource, captureInputs?.sourceID(for: document.project.timeline.lanes[target]) == nil {
+            lastError = "Choose an input for this lane before arming it."
+            return
+        }
+        if !isHosted {
+            for index in document.project.timeline.lanes.indices { document.project.timeline.lanes[index].isArmed = false }
+        }
+        document.project.timeline.lanes[target].isArmed = !shouldUnarm
+        self.document = document
         saveProject()
     }
 
@@ -396,7 +505,7 @@ final class ProjectStore: ObservableObject {
         }
         registerUndo(project: document.project)
         let number = document.project.timeline.lanes.count + 1
-        document.project.timeline.lanes.append(VideoLane(id: "lane_\(number)", name: "Camera \(number)"))
+        document.project.timeline.lanes.append(VideoLane(name: "Camera \(number)"))
         self.document = document
         saveProject()
     }
@@ -415,8 +524,8 @@ final class ProjectStore: ObservableObject {
             return
         }
         guard let index = document.project.timeline.lanes.firstIndex(where: { $0.id == laneId }) else { return }
-        if document.project.timeline.lanes[index].isArmed {
-            lastError = "Disarm or arm another lane before deleting this lane."
+        if document.project.timeline.lanes[index].isArmed || laneIsBusy(laneId) {
+            lastError = "Disarm this lane and wait for its take to finish before deleting it."
             return
         }
         registerUndo(project: document.project)
@@ -426,6 +535,15 @@ final class ProjectStore: ObservableObject {
             self.selectedClipId = nil
             self.selectedMediaAssetId = nil
         }
+        self.document = document
+        saveProject()
+    }
+
+    func toggleLaneMuted(_ laneId: String) {
+        guard var document else { return }
+        guard let index = document.project.timeline.lanes.firstIndex(where: { $0.id == laneId }) else { return }
+        registerUndo(project: document.project)
+        document.project.timeline.lanes[index].isMuted.toggle()
         self.document = document
         saveProject()
     }
@@ -535,54 +653,31 @@ final class ProjectStore: ObservableObject {
     }
 
     func playbackSyncOffsetSeconds(for cameraDeviceId: String?, displayName: String?) -> Double {
-        let id = cameraDeviceId ?? "default-camera"
-        let searchableName = "\(id) \(displayName ?? "")".lowercased()
-        if let stored = project.captureLatencyProfiles.first(where: { $0.cameraDeviceId == id })?.playbackSyncOffsetSeconds {
-            if let normalized = normalizedKnownCalibrationValue(stored, cameraDeviceId: id, searchableName: searchableName) {
-                return normalized
-            }
-            return stored
-        }
-        if let appDefault = appCalibrationDefaults.calibration(for: id, displayName: displayName) {
-            return appDefault.playbackSyncOffsetSeconds
-        }
-        if id.hasPrefix("window:") {
-            return 0.111
-        }
-        if isIPhoneContinuitySource(searchableName) {
-            return 0.245
-        }
-        return defaultPlaybackSyncOffsetSeconds
+        // New takes use sample timestamps; no guessed camera-specific correction.
+        return 0
     }
 
     func effectivePlaybackSyncOffsetSeconds(for clip: VideoClip) -> Double {
-        let id = clip.cameraDeviceId ?? "default-camera"
-        let profileName = project.captureLatencyProfiles.first(where: { $0.cameraDeviceId == id })?.displayName ?? ""
-        let searchableName = "\(id) \(profileName)".lowercased()
-        if let stored = clip.playbackSyncOffsetSeconds,
-           let normalized = normalizedKnownCalibrationValue(stored, cameraDeviceId: id, searchableName: searchableName) {
-            return normalized
-        }
-        return clip.playbackSyncOffsetSeconds ?? playbackSyncOffsetSeconds(for: clip.cameraDeviceId)
+        // Preserve explicit adjustments in older projects without applying new guesses.
+        clip.playbackSyncOffsetSeconds ?? project.sync.defaultPlaybackSyncOffsetSeconds ?? 0
     }
 
-    func startTakeRegion(at timecode: Timecode, observedTimecode: Timecode? = nil, cameraDeviceId: String?, cameraDisplayName: String? = nil) {
-        guard pendingTake == nil else { return }
-        guard let lane = project.timeline.lanes.first(where: { $0.isArmed }) else {
+    func startTakeRegion(at timecode: Timecode, observedTimecode: Timecode? = nil, cameraDeviceId: String?, cameraDisplayName: String? = nil, preciseSeconds: Double? = nil, captureHostSeconds: Double? = nil, laneID: String? = nil) {
+        guard let lane = project.timeline.lanes.first(where: { $0.isArmed && (laneID == nil || $0.id == laneID) }), pendingTakes[lane.id] == nil else {
             lastError = "Arm a camera lane before recording a take region."
             return
         }
-        if let armedBuffer, armedBuffer.laneId == lane.id {
+        if let armedBuffer = armedBuffers[lane.id] {
             let now = DispatchTime.now().uptimeNanoseconds
             let recordingHostTime = armedBuffer.recordingStartedHostTime ?? armedBuffer.bufferStartHostTime
-            let elapsedSinceBufferStarted = Double(now - recordingHostTime) / 1_000_000_000.0
-            let transportDetectionDelay = max(0, (observedTimecode ?? timecode).secondsValue - timecode.secondsValue)
+            let elapsedSinceBufferStarted = max(0, (captureHostSeconds ?? Double(now) / 1_000_000_000.0) - Double(recordingHostTime) / 1_000_000_000.0)
+            let transportDetectionDelay = captureHostSeconds == nil ? max(0, (observedTimecode ?? timecode).secondsValue - timecode.secondsValue) : 0
             let trimInSeconds = max(0, elapsedSinceBufferStarted - transportDetectionDelay)
-            pendingTake = PendingTakeRegion(
+            pendingTakes[lane.id] = PendingTakeRegion(
                 laneId: armedBuffer.laneId,
                 clipId: armedBuffer.clipId,
                 startTimecode: timecode,
-                startSeconds: timecode.secondsValue,
+                startSeconds: preciseSeconds ?? timecode.secondsValue,
                 captureLatencyMs: 0,
                 playbackSyncOffsetSeconds: armedBuffer.playbackSyncOffsetSeconds,
                 cameraDeviceId: armedBuffer.cameraDeviceId,
@@ -590,68 +685,75 @@ final class ProjectStore: ObservableObject {
                 relativeVideoFile: armedBuffer.relativeVideoFile,
                 trimInSeconds: trimInSeconds
             )
-            self.armedBuffer = nil
+            self.armedBuffers[lane.id] = nil
             return
         }
-        let clipNumber = project.timeline.lanes.flatMap(\.clips).count + 1
-        let latency = captureLatencyMs(for: cameraDeviceId)
+        let takeID = "take_" + UUID().uuidString
+        let latency = 0
         let playbackSyncOffset = playbackSyncOffsetSeconds(for: cameraDeviceId, displayName: cameraDisplayName)
-        pendingTake = PendingTakeRegion(
+        pendingTakes[lane.id] = PendingTakeRegion(
             laneId: lane.id,
-            clipId: String(format: "take_%03d", clipNumber),
+            clipId: takeID,
             startTimecode: timecode,
-            startSeconds: timecode.secondsValue,
+            startSeconds: preciseSeconds ?? timecode.secondsValue,
             captureLatencyMs: latency,
             playbackSyncOffsetSeconds: playbackSyncOffset,
             cameraDeviceId: cameraDeviceId,
             hostTime: DispatchTime.now().uptimeNanoseconds,
-            relativeVideoFile: String(format: "media/video/take_%03d.mov", clipNumber),
+            relativeVideoFile: "media/video/\(takeID).mov",
             trimInSeconds: 0
         )
     }
 
-    func startArmedBuffer(cameraDeviceId: String?, cameraDisplayName: String? = nil) {
-        guard armedBuffer == nil, pendingTake == nil else { return }
-        guard let lane = project.timeline.lanes.first(where: { $0.isArmed }) else { return }
-        let clipNumber = project.timeline.lanes.flatMap(\.clips).count + 1
-        armedBuffer = ArmedCaptureBuffer(
+    func startArmedBuffer(cameraDeviceId: String?, cameraDisplayName: String? = nil, laneID: String? = nil) {
+        guard let lane = project.timeline.lanes.first(where: { $0.isArmed && (laneID == nil || $0.id == laneID) }), armedBuffers[lane.id] == nil, pendingTakes[lane.id] == nil else { return }
+        let takeID = "take_" + UUID().uuidString
+        armedBuffers[lane.id] = ArmedCaptureBuffer(
             laneId: lane.id,
-            clipId: String(format: "take_%03d", clipNumber),
+            clipId: takeID,
             cameraDeviceId: cameraDeviceId,
             bufferStartHostTime: DispatchTime.now().uptimeNanoseconds,
             recordingStartedHostTime: nil,
-            relativeVideoFile: String(format: "media/video/take_%03d.mov", clipNumber),
+            relativeVideoFile: "media/video/\(takeID).mov",
             playbackSyncOffsetSeconds: playbackSyncOffsetSeconds(for: cameraDeviceId, displayName: cameraDisplayName)
         )
     }
 
-    func pendingArmedBufferURL() -> URL? {
-        guard let armedBuffer, let document else { return nil }
+    func pendingArmedBufferURL(laneID: String? = nil) -> URL? {
+        guard let armedBuffer = laneID.flatMap({ armedBuffers[$0] }) ?? (laneID == nil ? armedBuffer : nil), let document else { return nil }
         return document.absoluteURL(for: armedBuffer.relativeVideoFile)
     }
 
-    func markArmedBufferRecordingStarted(hostTime: UInt64) {
-        guard armedBuffer != nil else { return }
-        armedBuffer?.recordingStartedHostTime = hostTime
+    func markArmedBufferRecordingStarted(hostTime: UInt64, laneID: String? = nil) {
+        guard let id = laneID ?? armedBuffer?.laneId, armedBuffers[id] != nil else { return }
+        guard armedBuffers[id]?.recordingStartedHostTime != hostTime else { return }
+        armedBuffers[id]?.recordingStartedHostTime = hostTime
     }
 
-    func discardArmedBuffer() {
-        armedBuffer = nil
+    func discardArmedBuffer(laneID: String? = nil) {
+        if let id = laneID ?? armedBuffer?.laneId { armedBuffers[id] = nil }
     }
 
-    func pendingRecordingURL() -> URL? {
-        guard let pendingTake, let document else { return nil }
+    func pendingRecordingURL(laneID: String? = nil) -> URL? {
+        guard let pendingTake = laneID.flatMap({ pendingTakes[$0] }) ?? (laneID == nil ? pendingTake : nil), let document else { return nil }
         return document.absoluteURL(for: pendingTake.relativeVideoFile)
     }
 
-    func finishTakeRegion(at timecode: Timecode, warnings: [String] = []) {
-        guard let pendingTake else { return }
+    func finishTakeRegion(at timecode: Timecode, warnings: [String] = [], preciseSeconds: Double? = nil, actualMediaDuration: Double? = nil, laneID: String? = nil) {
+        guard let pendingTake = laneID.flatMap({ pendingTakes[$0] }) ?? (laneID == nil ? pendingTake : nil) else { return }
         guard var document else { return }
         guard let laneIndex = document.project.timeline.lanes.firstIndex(where: { $0.id == pendingTake.laneId }) else { return }
 
-        let visibleDuration = max(0.1, timecode.secondsValue - pendingTake.startSeconds)
-        let mediaDuration = pendingTake.trimInSeconds + visibleDuration
-        let mediaAsset = MediaAsset(
+        let requestedDuration = max(0, (preciseSeconds ?? timecode.secondsValue) - pendingTake.startSeconds)
+        let availableDuration = actualMediaDuration.map { max(0, $0 - pendingTake.trimInSeconds) } ?? requestedDuration
+        let visibleDuration = min(requestedDuration, availableDuration)
+        guard visibleDuration > 0, FileManager.default.fileExists(atPath: document.absoluteURL(for: pendingTake.relativeVideoFile).path) else {
+            cancelPendingTake(message: "No usable video was recorded. Check the input and try again.", laneID: pendingTake.laneId)
+            return
+        }
+        let mediaDuration = actualMediaDuration ?? (pendingTake.trimInSeconds + visibleDuration)
+        let existingMedia = document.project.media.first { $0.relativePath == pendingTake.relativeVideoFile }
+        let mediaAsset = existingMedia ?? MediaAsset(
             kind: .video,
             displayName: pendingTake.clipId,
             relativePath: pendingTake.relativeVideoFile,
@@ -665,7 +767,7 @@ final class ProjectStore: ObservableObject {
             armedLaneId: pendingTake.laneId,
             logicStartTimecode: pendingTake.startTimecode,
             logicStartSeconds: pendingTake.startSeconds,
-            timelineStartSeconds: pendingTake.trimInSeconds > 0 ? pendingTake.startSeconds : nil,
+            timelineStartSeconds: pendingTake.startSeconds,
             appCaptureStartHostTime: pendingTake.hostTime,
             captureLatencyMs: pendingTake.captureLatencyMs,
             durationSeconds: visibleDuration,
@@ -678,39 +780,66 @@ final class ProjectStore: ObservableObject {
         )
 
         registerUndo(project: document.project)
-        document.project.media.append(mediaAsset)
+        if existingMedia == nil { document.project.media.append(mediaAsset) }
         document.project.timeline.lanes[laneIndex].clips.append(clip)
         document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
         self.document = document
-        self.pendingTake = nil
+        self.pendingTakes[pendingTake.laneId] = nil
         self.pendingStopTimecode = nil
         selectedMediaAssetId = mediaAsset.id
         selectedClipId = clip.id
         saveProject()
     }
 
+    func setVideoOffsetMS(_ value: Double, laneID: String? = nil) {
+        guard value.isFinite, var document else { return }
+        let value = min(5000, max(-5000, value))
+        registerUndo(project: document.project)
+        if let laneID {
+            guard let index = document.project.timeline.lanes.firstIndex(where: { $0.id == laneID }) else { return }
+            document.project.timeline.lanes[index].videoOffsetMS = value
+        } else { document.project.sync.videoOffsetMS = value }
+        self.document = document
+        saveProject()
+    }
+
+    func beginSelectedClipFramingEdit() {
+        guard let selectedClipId else { return }
+        beginClipFramingEdit(selectedClipId)
+    }
+
+    func beginClipFramingEdit(_ clipId: String) {
+        guard let document, clip(id: clipId) != nil else { return }
+        registerUndo(project: document.project)
+    }
+
     func updateSelectedClipFraming(zoom: Double? = nil, offsetX: Double? = nil, offsetY: Double? = nil, rotationDegrees: Double? = nil, trackUndo: Bool = true, save: Bool = false, origin: FramingEditOrigin = .inspector) {
         guard let selectedClipId else { return }
+        updateClipFraming(selectedClipId, zoom: zoom, offsetX: offsetX, offsetY: offsetY,
+                          rotationDegrees: rotationDegrees, trackUndo: trackUndo, save: save, origin: origin)
+    }
+
+    func updateClipFraming(_ clipId: String, zoom: Double? = nil, offsetX: Double? = nil, offsetY: Double? = nil,
+                           rotationDegrees: Double? = nil, referenceLocalSeconds: Double? = nil,
+                           trackUndo: Bool = true, save: Bool = false, origin: FramingEditOrigin = .inspector) {
         guard var document else { return }
         for laneIndex in document.project.timeline.lanes.indices {
-            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == selectedClipId }) else {
-                continue
-            }
-            if trackUndo {
-                registerUndo(project: document.project)
-            }
-            var framing = document.project.timeline.lanes[laneIndex].clips[clipIndex].framing ?? ClipFraming()
-            if let zoom { framing.zoom = zoom }
-            if let offsetX { framing.offsetX = offsetX }
-            if let offsetY { framing.offsetY = offsetY }
-            if let rotationDegrees { framing.rotationDegrees = rotationDegrees }
-            document.project.timeline.lanes[laneIndex].clips[clipIndex].framing = framing
+            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == clipId }) else { continue }
+            if trackUndo { registerUndo(project: document.project) }
+            var clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
+            let reference = referenceLocalSeconds.map { clip.automatedFraming(atLocalSecond: $0) } ?? clip.framing ?? ClipFraming()
+            var target = reference
+            if let zoom { target.zoom = min(16, max(0.25, zoom)) }
+            if let offsetX { target.offsetX = min(8, max(-8, offsetX)) }
+            if let offsetY { target.offsetY = min(8, max(-8, offsetY)) }
+            if let rotationDegrees { target.rotationDegrees = rotationDegrees }
+            // Reframe the whole curve. Explicit marker controls still author animation;
+            // ordinary pan/zoom must not spring back to an unchanged keyframe.
+            clip.reframe(from: reference, to: target)
+            document.project.timeline.lanes[laneIndex].clips[clipIndex] = clip
             self.document = document
-            let nextRevision = (latestFramingEdit?.revision ?? 0) + 1
-            latestFramingEdit = FramingEditEvent(clipId: selectedClipId, origin: origin, revision: nextRevision)
-            if save {
-                saveProject()
-            }
+            latestFramingEdit = FramingEditEvent(clipId: clipId, origin: origin, revision: (latestFramingEdit?.revision ?? 0) + 1)
+            if save { saveProject() }
             return
         }
     }
@@ -775,6 +904,11 @@ final class ProjectStore: ObservableObject {
         guard var document else { return }
         registerUndo(project: document.project)
         document.project.exportSettings.resolution = resolution
+        switch resolution {
+        case .hd1080: document.project.exportSettings.canvasWidth = 1920; document.project.exportSettings.canvasHeight = 1080
+        case .uhd4k: document.project.exportSettings.canvasWidth = 3840; document.project.exportSettings.canvasHeight = 2160
+        case .source: break
+        }
         self.document = document
         saveProject()
     }
@@ -824,17 +958,17 @@ final class ProjectStore: ObservableObject {
 
     func snapSelectedClipStartToGrid() {
         editSelectedClipOnGrid { clip, gridSeconds in
-            let end = clip.timelineStartSeconds + clip.durationSeconds
-            let snappedStart = max(0, (clip.timelineStartSeconds / gridSeconds).rounded() * gridSeconds)
-            clip.timelineStartSeconds = min(snappedStart, max(0, end - 0.1))
-            clip.durationSeconds = max(0.1, end - clip.timelineStartSeconds)
+            let offset = project.videoOffsetSeconds(forLane: clip.armedLaneId)
+            let snappedStart = ((clip.timelineStartSeconds + offset) / gridSeconds).rounded() * gridSeconds - offset
+            clip.trimLeftEdge(to: snappedStart)
         }
     }
 
     func snapSelectedClipEndToGrid() {
         editSelectedClipOnGrid { clip, gridSeconds in
             let end = clip.timelineStartSeconds + clip.durationSeconds
-            let snappedEnd = max(clip.timelineStartSeconds + 0.1, (end / gridSeconds).rounded() * gridSeconds)
+            let offset = project.videoOffsetSeconds(forLane: clip.armedLaneId)
+            let snappedEnd = max(clip.timelineStartSeconds + 0.1, ((end + offset) / gridSeconds).rounded() * gridSeconds - offset)
             clip.durationSeconds = max(0.1, snappedEnd - clip.timelineStartSeconds)
         }
     }
@@ -859,21 +993,13 @@ final class ProjectStore: ObservableObject {
                 continue
             }
             let clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
+            let seconds = seconds - document.project.videoOffsetSeconds(forLane: document.project.timeline.lanes[laneIndex].id)
             guard seconds > clip.timelineStartSeconds + 0.05, seconds < clip.timelineStartSeconds + clip.durationSeconds - 0.05 else {
                 return
             }
             registerUndo(project: document.project)
-            let firstDuration = seconds - clip.timelineStartSeconds
-            let secondDuration = clip.durationSeconds - firstDuration
-            document.project.timeline.lanes[laneIndex].clips[clipIndex].durationSeconds = firstDuration
-
-            var secondClip = clip
-            secondClip.id = UUID().uuidString
-            secondClip.clipId = "\(clip.clipId)_cut"
-            secondClip.timelineStartSeconds = seconds
-            secondClip.logicStartSeconds = seconds
-            secondClip.logicStartTimecode = Timecode.from(seconds: seconds, frameRate: clip.frameRate)
-            secondClip.durationSeconds = secondDuration
+            guard let (firstClip, secondClip) = clip.split(at: seconds) else { return }
+            document.project.timeline.lanes[laneIndex].clips[clipIndex] = firstClip
             document.project.timeline.lanes[laneIndex].clips.insert(secondClip, at: clipIndex + 1)
             self.selectedClipId = secondClip.id
             selectedMediaAssetId = secondClip.mediaAssetId
@@ -883,24 +1009,96 @@ final class ProjectStore: ObservableObject {
         }
     }
 
+    func canInsertAutomationMarker(at timelineSeconds: Double) -> Bool {
+        automationClipLocation(at: timelineSeconds) != nil
+    }
+
+    func insertAutomationMarker(at timelineSeconds: Double, framing explicitFraming: ClipFraming? = nil) {
+        guard var document else { return }
+        guard let location = automationClipLocation(at: timelineSeconds, in: document.project) else {
+            lastError = "Select a region or place the playhead over a region before inserting an automation marker."
+            return
+        }
+
+        registerUndo(project: document.project)
+        var clip = document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex]
+        let localSeconds = min(max(0, timelineSeconds - document.project.presentedClip(clip).timelineStartSeconds), clip.durationSeconds)
+        let markerFraming = explicitFraming ?? clip.automatedFraming(atLocalSecond: localSeconds)
+        let tolerance = max(0.02, 0.5 / max(1, clip.frameRate.framesPerSecond))
+        if let markerIndex = clip.automationMarkers.firstIndex(where: { abs($0.timeSeconds - localSeconds) <= tolerance }) {
+            clip.automationMarkers[markerIndex].timeSeconds = localSeconds
+            clip.automationMarkers[markerIndex].framing = markerFraming
+        } else {
+            clip.automationMarkers.append(
+                ClipAutomationMarker(timeSeconds: localSeconds, framing: markerFraming)
+            )
+        }
+        clip.automationMarkers.sort { $0.timeSeconds < $1.timeSeconds }
+        document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex] = clip
+        self.document = document
+        selectedClipId = clip.id
+        selectedMediaAssetId = clip.mediaAssetId
+        saveProject()
+    }
+
+    func deleteNearestAutomationMarker(at timelineSeconds: Double) {
+        guard var document else { return }
+        guard let location = automationClipLocation(at: timelineSeconds, in: document.project) else { return }
+        var clip = document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex]
+        guard !clip.automationMarkers.isEmpty else { return }
+        let localSeconds = min(max(0, timelineSeconds - document.project.presentedClip(clip).timelineStartSeconds), clip.durationSeconds)
+        guard let markerIndex = clip.automationMarkers.indices.min(by: {
+            abs(clip.automationMarkers[$0].timeSeconds - localSeconds) < abs(clip.automationMarkers[$1].timeSeconds - localSeconds)
+        }) else {
+            return
+        }
+        registerUndo(project: document.project)
+        clip.automationMarkers.remove(at: markerIndex)
+        document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex] = clip
+        self.document = document
+        saveProject()
+    }
+
+    func deleteAutomationMarker(_ markerId: String, in clipId: String) {
+        guard var document else { return }
+        for laneIndex in document.project.timeline.lanes.indices {
+            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == clipId }) else {
+                continue
+            }
+            guard document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.contains(where: { $0.id == markerId }) else { return }
+            registerUndo(project: document.project)
+            document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.removeAll { $0.id == markerId }
+            self.document = document
+            saveProject()
+            return
+        }
+    }
+
+    func clearSelectedClipAutomation() {
+        guard let selectedClipId else { return }
+        guard var document else { return }
+        for laneIndex in document.project.timeline.lanes.indices {
+            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == selectedClipId }) else {
+                continue
+            }
+            guard !document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.isEmpty else { return }
+            registerUndo(project: document.project)
+            document.project.timeline.lanes[laneIndex].clips[clipIndex].automationMarkers.removeAll()
+            self.document = document
+            saveProject()
+            return
+        }
+    }
+
     func updateClipStart(_ clipId: String, startSeconds: Double) {
         editClip(clipId) { clip in
-            clip.timelineStartSeconds = max(0, startSeconds)
+            clip.timelineStartSeconds = max(0, startSeconds - project.videoOffsetSeconds(forLane: clip.armedLaneId))
         }
     }
 
     func updateClipLeftEdge(_ clipId: String, startSeconds: Double) {
         editClip(clipId) { clip in
-            let oldStart = clip.timelineStartSeconds
-            let oldEnd = clip.timelineStartSeconds + clip.durationSeconds
-            let requestedStart = max(0, min(startSeconds, oldEnd - 0.1))
-            let delta = requestedStart - oldStart
-            let requestedTrimIn = clip.trimInSeconds + delta
-            let clampedTrimIn = max(0, requestedTrimIn)
-            let adjustedStart = oldStart + (clampedTrimIn - clip.trimInSeconds)
-            clip.timelineStartSeconds = min(adjustedStart, oldEnd - 0.1)
-            clip.trimInSeconds = clampedTrimIn
-            clip.durationSeconds = max(0.1, oldEnd - clip.timelineStartSeconds)
+            clip.trimLeftEdge(to: startSeconds - project.videoOffsetSeconds(forLane: clip.armedLaneId))
         }
     }
 
@@ -941,9 +1139,11 @@ final class ProjectStore: ObservableObject {
     }
 
     func undoProjectChange() {
+        guard !hasCaptureActivity, !hasArmedLane else { return }
         guard var document, let previous = undoStack.popLast() else { return }
         redoStack.append(document.project)
         document.project = previous
+        for index in document.project.timeline.lanes.indices { document.project.timeline.lanes[index].isArmed = false }
         self.document = document
         reconcileSelection()
         updateUndoRedoState()
@@ -951,9 +1151,11 @@ final class ProjectStore: ObservableObject {
     }
 
     func redoProjectChange() {
+        guard !hasCaptureActivity, !hasArmedLane else { return }
         guard var document, let next = redoStack.popLast() else { return }
         undoStack.append(document.project)
         document.project = next
+        for index in document.project.timeline.lanes.indices { document.project.timeline.lanes[index].isArmed = false }
         self.document = document
         reconcileSelection()
         updateUndoRedoState()
@@ -964,16 +1166,12 @@ final class ProjectStore: ObservableObject {
         project.timeline.lanes.flatMap(\.clips).first { $0.id == selectedClipId }
     }
 
+    func clip(id: String) -> VideoClip? {
+        project.timeline.lanes.lazy.flatMap(\.clips).first { $0.id == id }
+    }
+
     func playbackClip(at seconds: Double) -> VideoClip? {
-        if let selected = selectedClip(), selected.containsTimelineSecond(seconds) {
-            return selected
-        }
-        for lane in project.timeline.lanes where !lane.isMuted {
-            if let clip = lane.clips.last(where: { $0.isEnabled && $0.containsTimelineSecond(seconds) }) {
-                return clip
-            }
-        }
-        return nil
+        project.playbackClip(at: seconds)
     }
 
     func mediaAsset(for clip: VideoClip) -> MediaAsset? {
@@ -1078,6 +1276,9 @@ final class ProjectStore: ObservableObject {
             let division = document.project.timeline.gridDivision ?? .beat
             let gridSeconds = max(0.001, 60.0 / max(1, bpm) * division.beats)
             edit(&document.project.timeline.lanes[laneIndex].clips[clipIndex], gridSeconds)
+            let mediaId = document.project.timeline.lanes[laneIndex].clips[clipIndex].mediaAssetId
+            let mediaDuration = document.project.media.first { $0.id == mediaId }?.durationSeconds
+            document.project.timeline.lanes[laneIndex].clips[clipIndex].constrainDuration(toSourceDuration: mediaDuration)
             let clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
             document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
             self.document = document
@@ -1094,6 +1295,9 @@ final class ProjectStore: ObservableObject {
             }
             registerUndo(project: document.project)
             edit(&document.project.timeline.lanes[laneIndex].clips[clipIndex])
+            let mediaId = document.project.timeline.lanes[laneIndex].clips[clipIndex].mediaAssetId
+            let mediaDuration = document.project.media.first { $0.id == mediaId }?.durationSeconds
+            document.project.timeline.lanes[laneIndex].clips[clipIndex].constrainDuration(toSourceDuration: mediaDuration)
             let clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
             document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
             self.document = document
@@ -1114,10 +1318,49 @@ final class ProjectStore: ObservableObject {
         }
         return candidate
     }
+
+    private struct ClipLocation {
+        var laneIndex: Int
+        var clipIndex: Int
+    }
+
+    private func automationClipLocation(at timelineSeconds: Double) -> ClipLocation? {
+        automationClipLocation(at: timelineSeconds, in: project)
+    }
+
+    private func automationClipLocation(at timelineSeconds: Double, in project: CamOrderProject) -> ClipLocation? {
+        if let selectedClipId {
+            for laneIndex in project.timeline.lanes.indices {
+                if let clipIndex = project.timeline.lanes[laneIndex].clips.firstIndex(where: { clip in
+                    clip.id == selectedClipId && project.presentedClip(clip).containsTimelineSecond(timelineSeconds)
+                }) {
+                    return ClipLocation(laneIndex: laneIndex, clipIndex: clipIndex)
+                }
+            }
+        }
+
+        for laneIndex in project.timeline.lanes.indices where !project.timeline.lanes[laneIndex].isMuted {
+            if let clipIndex = project.timeline.lanes[laneIndex].clips.lastIndex(where: { clip in
+                clip.isEnabled && project.presentedClip(clip).containsTimelineSecond(timelineSeconds)
+            }) {
+                return ClipLocation(laneIndex: laneIndex, clipIndex: clipIndex)
+            }
+        }
+
+        return nil
+    }
+
+    private func videoDurationSeconds(for url: URL) async -> Double? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration) else { return nil }
+        let seconds = duration.seconds
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        return seconds
+    }
 }
 
 private extension VideoClip {
     func containsTimelineSecond(_ second: Double) -> Bool {
-        second >= timelineStartSeconds && second <= timelineStartSeconds + durationSeconds
+        second >= timelineStartSeconds && second < timelineStartSeconds + durationSeconds
     }
 }

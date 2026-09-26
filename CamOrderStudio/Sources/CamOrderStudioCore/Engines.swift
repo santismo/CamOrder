@@ -37,9 +37,36 @@ public final class LogicSyncEngine: ObservableObject {
     private let idleDisplayInterval: TimeInterval = 0.5
     private var lastIdleDisplayUpdate = Date.distantPast
 
-    public init() {}
+    @Published public var timecodeOriginHours = 1
+    @Published public private(set) var logicLinkConnected = false
+    public func setLogicLinkConnected(_ connected: Bool) { if logicLinkConnected != connected { logicLinkConnected = connected } }
+    @Published public private(set) var hostTimingDelayed = false
+    public func setHostTimingDelayed(_ delayed: Bool) { if hostTimingDelayed != delayed { hostTimingDelayed = delayed } }
+    public let isHosted: Bool
+    public init(isHosted: Bool = false) { self.isHosted = isHosted }
+
+    public func receiveHostPosition(seconds: Double, playing: Bool, tempo: Double, available: Bool, sourceName: String = "Logic Audio Unit transport") {
+        guard isHosted else { return }
+        let wasRolling = isTransportRolling
+        let position = max(0, seconds.isFinite ? seconds : 0)
+        let time = Timecode.from(seconds: position, frameRate: .fps30)
+        if currentTimecode != time { currentTimecode = time }
+        if displayTimecode != time { displayTimecode = time }
+        if displaySeconds != position { displaySeconds = position }
+        if tempo.isFinite && tempo > 0 && detectedTempoBPM != tempo { detectedTempoBPM = tempo }
+        let sources = available ? [sourceName] : []
+        if connectedSourceNames != sources { connectedSourceNames = sources }
+        let error = available ? nil : "Waiting for transport from Logic. Keep CamOrder enabled on Stereo Out and start playback."
+        if lastErrorMessage != error { lastErrorMessage = error }
+        if playing && !wasRolling { transportStartTimecode = time }
+        if !playing { transportStartTimecode = nil }
+        let nextState: LogicSyncState = available ? (playing ? .playing : .stopped) : .disconnected
+        if state != nextState { state = nextState }
+    }
+
 
     public func startMTCInput() {
+        guard !isHosted else { return }
         guard !isRunning else { return }
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
         var client = MIDIClientRef()
@@ -193,6 +220,7 @@ public final class LogicSyncEngine: ObservableObject {
     }
 
     private func retuneDisplayTimerIfNeeded() {
+        guard !isHosted else { return }
         let nextInterval = desiredDisplayTimerInterval()
         guard abs(displayTimerInterval - nextInterval) > 0.001 else { return }
         startDisplayTimer(interval: nextInterval)
@@ -372,322 +400,6 @@ public struct MIDIClockParser {
     // Future secondary sync path: MIDI Clock plus Song Position Pointer for beat-based chase.
 }
 
-@MainActor
-public final class CameraCaptureEngine: NSObject, ObservableObject, AVCaptureFileOutputRecordingDelegate {
-    @Published public private(set) var isPreviewing = false
-    @Published public private(set) var isRecording = false
-    @Published public private(set) var isFinishingRecording = false
-    @Published public private(set) var availableDevices: [CameraDeviceInfo] = []
-    @Published public private(set) var selectedDeviceID: String?
-    @Published public private(set) var lastErrorMessage: String?
-    @Published public private(set) var lastRecordedFileURL: URL?
-    @Published public private(set) var lastRecordingStartedHostTime: UInt64?
-
-    public let previewSession = AVCaptureSession()
-    public private(set) var screenCropRect: CGRect?
-    private var currentInput: AVCaptureDeviceInput?
-    private var currentScreenInput: AVCaptureScreenInput?
-    private var selectedDeviceDisplayName: String?
-    private let movieOutput = AVCaptureMovieFileOutput()
-
-    public override init() {
-        super.init()
-        refreshDevices()
-    }
-
-    public func refreshDevices() {
-        var deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .externalUnknown]
-        if #available(macOS 14.0, *) {
-            deviceTypes.append(.continuityCamera)
-        }
-        let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: deviceTypes,
-            mediaType: .video,
-            position: .unspecified
-        )
-        var seenDeviceIds = Set<String>()
-        var devices = discovery.devices.compactMap { device -> CameraDeviceInfo? in
-            guard seenDeviceIds.insert(device.uniqueID).inserted else { return nil }
-            return CameraDeviceInfo(id: device.uniqueID, displayName: device.localizedName, kind: .camera)
-        }
-        for device in AVCaptureDevice.devices(for: .video) where seenDeviceIds.insert(device.uniqueID).inserted {
-            devices.append(CameraDeviceInfo(id: device.uniqueID, displayName: device.localizedName, kind: .camera))
-        }
-        devices.append(CameraDeviceInfo(id: "screen:main", displayName: "Main Display Screen Capture", kind: .screen))
-        devices.append(CameraDeviceInfo(id: "screen:all", displayName: "Whole Screen Capture", kind: .screen))
-        devices.append(CameraDeviceInfo(id: "screen:region", displayName: "Custom Screen Region", kind: .screen))
-        devices.append(CameraDeviceInfo(id: "window:region", displayName: "Windowed Capture", kind: .window))
-        if let selectedDeviceID, !devices.contains(where: { $0.id == selectedDeviceID }) {
-            let displayName = selectedDeviceDisplayName ?? "Previous Camera"
-            devices.insert(CameraDeviceInfo(id: selectedDeviceID, displayName: "\(displayName) (reconnect)", kind: .camera), at: 0)
-        }
-        availableDevices = devices
-        if selectedDeviceID == nil {
-            selectedDeviceID = availableDevices.first?.id
-            selectedDeviceDisplayName = availableDevices.first?.displayName
-        } else if let selected = availableDevices.first(where: { $0.id == selectedDeviceID }) {
-            selectedDeviceDisplayName = selected.displayName.replacingOccurrences(of: " (reconnect)", with: "")
-        }
-    }
-
-    public func selectDevice(id: String) {
-        selectedDeviceID = id
-        selectedDeviceDisplayName = availableDevices.first(where: { $0.id == id })?.displayName.replacingOccurrences(of: " (reconnect)", with: "")
-        if isPreviewing {
-            startPreview()
-        }
-    }
-
-    public func selectedDeviceInfo() -> CameraDeviceInfo? {
-        refreshDevices()
-        return availableDevices.first { $0.id == selectedDeviceID }
-    }
-
-    public func setScreenCropRect(_ rect: CGRect?) {
-        screenCropRect = rect
-        if selectedDeviceID?.hasPrefix("screen:") == true || selectedDeviceID?.hasPrefix("window:") == true {
-            if let rect, selectedDeviceID != "screen:all" {
-                currentScreenInput?.cropRect = rect
-            } else {
-                startPreview()
-            }
-        }
-    }
-
-    public func startPreview() {
-        refreshDevices()
-        guard let selectedDeviceID else {
-            lastErrorMessage = "No camera is selected."
-            return
-        }
-
-        if selectedDeviceID.hasPrefix("screen:") {
-            configureScreenCapturePreview()
-            return
-        }
-
-        if selectedDeviceID.hasPrefix("window:") {
-            configureWindowCapturePreview()
-            return
-        }
-
-        guard let device = AVCaptureDevice(uniqueID: selectedDeviceID) else {
-            lastErrorMessage = "The selected camera is not currently available. Reconnect it, wake the iPhone, confirm Continuity Camera is enabled, then use Refresh Cameras."
-            return
-        }
-
-        do {
-            let input = try AVCaptureDeviceInput(device: device)
-            previewSession.beginConfiguration()
-            if let currentInput {
-                previewSession.removeInput(currentInput)
-            }
-            if let currentScreenInput {
-                previewSession.removeInput(currentScreenInput)
-                self.currentScreenInput = nil
-            }
-            if previewSession.canAddInput(input) {
-                previewSession.addInput(input)
-                currentInput = input
-            }
-            if !previewSession.outputs.contains(movieOutput), previewSession.canAddOutput(movieOutput) {
-                previewSession.addOutput(movieOutput)
-            }
-            previewSession.commitConfiguration()
-            if !previewSession.isRunning {
-                DispatchQueue.global(qos: .userInitiated).async { [previewSession] in
-                    previewSession.startRunning()
-                }
-            }
-            lastErrorMessage = nil
-        } catch {
-            lastErrorMessage = error.localizedDescription
-        }
-        isPreviewing = true
-    }
-
-    private func configureScreenCapturePreview() {
-        guard ensureScreenCapturePermission() else { return }
-        guard let screenInput = AVCaptureScreenInput(displayID: CGMainDisplayID()) else {
-            lastErrorMessage = "Could not create a screen capture input."
-            return
-        }
-        screenInput.capturesCursor = true
-        screenInput.capturesMouseClicks = false
-        screenInput.minFrameDuration = CMTime(value: 1, timescale: 30)
-        if selectedDeviceID == "screen:region", let screenCropRect {
-            screenInput.cropRect = screenCropRect
-        }
-
-        configure(screenInput: screenInput)
-        lastErrorMessage = nil
-    }
-
-    private func configureWindowCapturePreview() {
-        guard ensureScreenCapturePermission() else { return }
-        guard let screenInput = AVCaptureScreenInput(displayID: CGMainDisplayID()) else {
-            lastErrorMessage = "Could not create a window capture input."
-            return
-        }
-        screenInput.capturesCursor = true
-        screenInput.capturesMouseClicks = false
-        screenInput.minFrameDuration = CMTime(value: 1, timescale: 30)
-        if let screenCropRect {
-            screenInput.cropRect = screenCropRect
-            lastErrorMessage = nil
-        } else if let logicBounds = Self.logicWindowBoundsOnMainDisplay() {
-            screenInput.cropRect = logicBounds
-            lastErrorMessage = nil
-        } else {
-            lastErrorMessage = "Logic Pro window was not found. Use Show Region Box, place it over Logic, then Apply Region."
-        }
-        configure(screenInput: screenInput)
-    }
-
-    private func configure(screenInput: AVCaptureScreenInput) {
-        previewSession.beginConfiguration()
-        if let currentInput {
-            previewSession.removeInput(currentInput)
-            self.currentInput = nil
-        }
-        if let currentScreenInput {
-            previewSession.removeInput(currentScreenInput)
-        }
-        if previewSession.canAddInput(screenInput) {
-            previewSession.addInput(screenInput)
-            currentScreenInput = screenInput
-        }
-        if !previewSession.outputs.contains(movieOutput), previewSession.canAddOutput(movieOutput) {
-            previewSession.addOutput(movieOutput)
-        }
-        previewSession.commitConfiguration()
-        if !previewSession.isRunning {
-            DispatchQueue.global(qos: .userInitiated).async { [previewSession] in
-                previewSession.startRunning()
-            }
-        }
-        isPreviewing = true
-    }
-
-    private func ensureScreenCapturePermission() -> Bool {
-        if CGPreflightScreenCaptureAccess() {
-            return true
-        }
-        let granted = CGRequestScreenCaptureAccess()
-        if !granted {
-            lastErrorMessage = "macOS reports Screen Recording permission is not available for CamOrder Studio. Toggle CamOrder Studio off/on in System Settings, quit the app, then reopen it."
-        }
-        return granted
-    }
-
-    public func stopPreview() {
-        if previewSession.isRunning {
-            DispatchQueue.global(qos: .userInitiated).async { [previewSession] in
-                previewSession.stopRunning()
-            }
-        }
-        isPreviewing = false
-    }
-
-    public func startRecording(to destinationURL: URL) throws {
-        guard selectedDeviceID != nil else {
-            lastErrorMessage = "Select a capture source before recording."
-            throw CameraCaptureError.unsupportedSource
-        }
-        if !isPreviewing || !previewSession.outputs.contains(movieOutput) {
-            startPreview()
-        }
-        guard previewSession.outputs.contains(movieOutput) else {
-            lastErrorMessage = "Movie recording output is not available for this camera."
-            throw CameraCaptureError.outputUnavailable
-        }
-        if FileManager.default.fileExists(atPath: destinationURL.path) {
-            try FileManager.default.removeItem(at: destinationURL)
-        }
-        try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        lastRecordedFileURL = nil
-        lastRecordingStartedHostTime = nil
-        lastErrorMessage = nil
-        isFinishingRecording = false
-        isRecording = true
-        movieOutput.startRecording(to: destinationURL, recordingDelegate: self)
-    }
-
-    public func stopRecording() {
-        guard movieOutput.isRecording else {
-            isRecording = false
-            return
-        }
-        isFinishingRecording = true
-        movieOutput.stopRecording()
-    }
-
-    nonisolated public func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        Task { @MainActor in
-            self.isRecording = false
-            self.isFinishingRecording = false
-            self.lastRecordedFileURL = outputFileURL
-            self.lastErrorMessage = error?.localizedDescription
-        }
-    }
-
-    nonisolated public func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
-        Task { @MainActor in
-            self.isRecording = true
-            self.lastRecordedFileURL = nil
-            self.lastRecordingStartedHostTime = DispatchTime.now().uptimeNanoseconds
-            self.lastErrorMessage = nil
-        }
-    }
-
-    public func markRecordingStoppedForUnsupportedSource() {
-        isRecording = false
-        isFinishingRecording = false
-    }
-
-    public static func estimatedLatencyMs(for source: CameraDeviceInfo?) -> Int {
-        guard let source else { return 0 }
-        let name = source.displayName.lowercased()
-        switch source.kind {
-        case .screen, .window:
-            return 0
-        case .camera:
-            if name.contains("iphone") || name.contains("continuity") {
-                return 140
-            }
-            if name.contains("obs") {
-                return 120
-            }
-            if name.contains("facetime") || name.contains("built-in") || name.contains("built in") {
-                return 45
-            }
-            if name.contains("usb") || name.contains("logitech") || name.contains("elgato") {
-                return 80
-            }
-            return 70
-        }
-    }
-
-    private static func logicWindowBoundsOnMainDisplay() -> CGRect? {
-        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return nil
-        }
-        let candidate = windowInfo.first { info in
-            let owner = (info[kCGWindowOwnerName as String] as? String)?.lowercased() ?? ""
-            let title = (info[kCGWindowName as String] as? String)?.lowercased() ?? ""
-            return owner.contains("logic") || title.contains("logic")
-        }
-        guard let boundsDict = candidate?[kCGWindowBounds as String] as? [String: Any],
-              let x = boundsDict["X"] as? CGFloat,
-              let y = boundsDict["Y"] as? CGFloat,
-              let width = boundsDict["Width"] as? CGFloat,
-              let height = boundsDict["Height"] as? CGFloat else {
-            return nil
-        }
-        return CGRect(x: x, y: y, width: width, height: height)
-    }
-}
-
 public enum CameraCaptureError: LocalizedError {
     case unsupportedSource
     case outputUnavailable
@@ -708,7 +420,7 @@ public final class RenderExportEngine: ObservableObject {
 
     public init() {}
 
-    public func export(project: CamOrderProject, from folderURL: URL, to destinationURL: URL) async throws {
+    public func export(project: CamOrderProject, from folderURL: URL, to destinationURL: URL, fromFirstClip: Bool = false, range: MovieExportRange? = nil) async throws {
         progress = 0
         let composition = AVMutableComposition()
         let renderSize = Self.renderSize(for: project.exportSettings)
@@ -720,16 +432,43 @@ public final class RenderExportEngine: ObservableObject {
         guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw RenderExportError.couldNotCreateVideoTrack
         }
-        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-        let segments = Self.videoSegments(for: project)
+        let allSegments = Self.videoSegments(for: project)
+        let exportStart = range?.startSeconds ?? (fromFirstClip ? (allSegments.first?.startSeconds ?? 0) : 0)
+        let exportEnd = range?.endSeconds ?? (allSegments.map { $0.startSeconds + $0.durationSeconds }.max() ?? 0)
+        let segments = allSegments.compactMap { segment -> RenderSegment? in
+            let start = max(exportStart, segment.startSeconds)
+            let end = min(exportEnd, segment.startSeconds + segment.durationSeconds)
+            guard end > start else { return nil }
+            return RenderSegment(clip: segment.clip, startSeconds: start, durationSeconds: end - start)
+        }
+        guard exportEnd > exportStart else { throw RenderExportError.noRenderableVideo }
+        // Export never overwrites project media, even if the save panel points at it.
+        guard !project.media.contains(where: {
+            folderURL.appendingPathComponent($0.relativePath).resolvingSymlinksInPath() == destinationURL.resolvingSymlinksInPath()
+        }) else { throw NSError(domain: "CamOrderExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Choose an export location outside your source media."]) }
+        var instructions: [AVVideoCompositionInstructionProtocol] = []
+        var cursor: Double = 0
+        func movieTime(_ seconds: Double) -> CMTime {
+            CMTime(value: Int64((seconds * 600).rounded()), timescale: 600)
+        }
+        func appendGap(until end: Double) {
+            let range = CMTimeRange(start: movieTime(cursor), end: movieTime(end))
+            guard range.duration.value > 0 else { return }
+            let gap = AVMutableVideoCompositionInstruction()
+            gap.timeRange = range
+            gap.backgroundColor = CGColor(gray: 0, alpha: 1)
+            gap.layerInstructions = []
+            instructions.append(gap)
+            cursor = end
+        }
         var maxVideoEndSeconds: Double = 0
         for segment in segments {
             guard let asset = project.media.first(where: { $0.id == segment.clip.mediaAssetId }) else {
-                continue
+                throw NSError(domain: "CamOrderExport", code: 2, userInfo: [NSLocalizedDescriptionKey: "A timeline clip is missing its media reference."])
             }
             let sourceAsset = AVURLAsset(url: folderURL.appendingPathComponent(asset.relativePath))
             guard let sourceTrack = try await sourceAsset.loadTracks(withMediaType: .video).first else {
-                continue
+                throw NSError(domain: "CamOrderExport", code: 3, userInfo: [NSLocalizedDescriptionKey: "No readable video track in \(asset.displayName)."])
             }
 
             let sourceDuration = try await sourceAsset.load(.duration)
@@ -738,11 +477,10 @@ public final class RenderExportEngine: ObservableObject {
             let segmentDurationSeconds = min(segment.durationSeconds, availableSeconds)
             guard segmentDurationSeconds > 0 else { continue }
 
-            let sourceRange = CMTimeRange(
-                start: CMTime(seconds: sourceStartSeconds, preferredTimescale: 600),
-                duration: CMTime(seconds: segmentDurationSeconds, preferredTimescale: 600)
-            )
-            let destinationTime = CMTime(seconds: segment.startSeconds, preferredTimescale: 600)
+            let destinationTime = movieTime(segment.startSeconds - exportStart)
+            let destinationEnd = movieTime(segment.startSeconds + segmentDurationSeconds - exportStart)
+            let sourceRange = CMTimeRange(start: movieTime(sourceStartSeconds), duration: CMTimeSubtract(destinationEnd, destinationTime))
+            guard sourceRange.duration.value > 0 else { continue }
             try videoTrack.insertTimeRange(sourceRange, of: sourceTrack, at: destinationTime)
 
             if project.exportSettings.audioMode == .cameraOnly || project.exportSettings.audioMode == .masteredAndCamera,
@@ -752,67 +490,109 @@ public final class RenderExportEngine: ObservableObject {
             }
 
             let sourceSize = try await Self.displaySize(for: sourceTrack)
-            let transform = try await Self.transform(
+            let startTransform = try await Self.transform(
                 for: sourceTrack,
                 sourceSize: sourceSize,
                 renderSize: renderSize,
-                framing: segment.clip.framing ?? ClipFraming()
+                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds)
             )
-            layerInstruction.setTransform(transform, at: destinationTime)
-            maxVideoEndSeconds = max(maxVideoEndSeconds, segment.startSeconds + segmentDurationSeconds)
+            let endTransform = try await Self.transform(
+                for: sourceTrack,
+                sourceSize: sourceSize,
+                renderSize: renderSize,
+                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds + segmentDurationSeconds)
+            )
+            let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+            layerInstruction.setTransformRamp(
+                fromStart: startTransform,
+                toEnd: endTransform,
+                timeRange: CMTimeRange(
+                    start: destinationTime,
+                    duration: sourceRange.duration
+                )
+            )
+            appendGap(until: destinationTime.seconds)
+            let instruction = AVMutableVideoCompositionInstruction()
+            instruction.timeRange = CMTimeRange(start: destinationTime, duration: sourceRange.duration)
+            instruction.backgroundColor = CGColor(gray: 0, alpha: 1)
+            instruction.layerInstructions = [layerInstruction]
+            instructions.append(instruction)
+            cursor = CMTimeAdd(destinationTime, sourceRange.duration).seconds
+            maxVideoEndSeconds = max(maxVideoEndSeconds, cursor)
         }
 
         guard maxVideoEndSeconds > 0 else {
             throw RenderExportError.noRenderableVideo
         }
-        try await insertMasterAudioIfNeeded(project: project, folderURL: folderURL, composition: composition)
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(
-            start: .zero,
-            duration: CMTime(seconds: max(maxVideoEndSeconds, project.timeline.durationSeconds), preferredTimescale: 600)
-        )
-        instruction.layerInstructions = [layerInstruction]
-        videoComposition.instructions = [instruction]
+        let outputDuration = exportEnd - exportStart
+        appendGap(until: outputDuration)
+        if composition.duration.seconds < outputDuration {
+            composition.insertEmptyTimeRange(CMTimeRange(start: composition.duration, duration: movieTime(outputDuration - composition.duration.seconds)))
+        }
+        var audioProject = project
+        audioProject.audio.audioOffsetSeconds -= exportStart
+        try await insertMasterAudioIfNeeded(project: audioProject, folderURL: folderURL, composition: composition, outputDuration: movieTime(outputDuration).seconds)
+        videoComposition.instructions = instructions
 
         guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
             throw RenderExportError.couldNotCreateExportSession
         }
-        if FileManager.default.fileExists(atPath: destinationURL.path) {
-            try FileManager.default.removeItem(at: destinationURL)
-        }
-        exportSession.outputURL = destinationURL
+        let temporaryURL = destinationURL.deletingLastPathComponent().appendingPathComponent(".camorder-export-\(UUID().uuidString).\(destinationURL.pathExtension)")
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        exportSession.outputURL = temporaryURL
+        exportSession.timeRange = CMTimeRange(start: .zero, duration: movieTime(outputDuration))
         exportSession.outputFileType = Self.outputFileType(for: project.exportSettings, destinationURL: destinationURL)
         exportSession.videoComposition = videoComposition
 
+        let exportSessionBox = ExportSessionBox(exportSession)
+        let progressTimer = Timer(timeInterval: 0.15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.progress = Double(exportSessionBox.session.progress) }
+        }
+        RunLoop.main.add(progressTimer, forMode: .common)
+        defer { progressTimer.invalidate() }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            exportSession.exportAsynchronously {
-                switch exportSession.status {
+            exportSessionBox.session.exportAsynchronously {
+                switch exportSessionBox.session.status {
                 case .completed:
                     continuation.resume()
                 case .failed, .cancelled:
-                    continuation.resume(throwing: exportSession.error ?? RenderExportError.exportFailed)
+                    continuation.resume(throwing: exportSessionBox.session.error ?? RenderExportError.exportFailed)
                 default:
                     continuation.resume(throwing: RenderExportError.exportFailed)
                 }
             }
         }
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            _ = try FileManager.default.replaceItemAt(destinationURL, withItemAt: temporaryURL)
+        } else {
+            try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+        }
         progress = 1
     }
 
-    private func insertMasterAudioIfNeeded(project: CamOrderProject, folderURL: URL, composition: AVMutableComposition) async throws {
+    public static func editedRange(in project: CamOrderProject) -> MovieExportRange? {
+        let segments = videoSegments(for: project)
+        guard let first = segments.first, let last = segments.last else { return nil }
+        return MovieExportRange(startSeconds: first.startSeconds, endSeconds: last.startSeconds + last.durationSeconds)
+    }
+
+    public static func firstVisibleClipSeconds(in project: CamOrderProject) -> Double {
+        videoSegments(for: project).first?.startSeconds ?? 0
+    }
+
+    private func insertMasterAudioIfNeeded(project: CamOrderProject, folderURL: URL, composition: AVMutableComposition, outputDuration: Double) async throws {
         guard project.exportSettings.audioMode == .masteredOnly || project.exportSettings.audioMode == .masteredAndCamera,
-              let relativePath = project.audio.masteredAudioFile,
-              let compositionTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+              let relativePath = project.audio.masteredAudioFile else {
             return
         }
         let asset = AVURLAsset(url: folderURL.appendingPathComponent(relativePath))
         guard let sourceTrack = try await asset.loadTracks(withMediaType: .audio).first else { return }
         let duration = try await asset.load(.duration)
-        let timelineDuration = max(project.timeline.durationSeconds, duration.seconds + max(0, project.audio.audioOffsetSeconds))
+        let timelineDuration = outputDuration
         let sourceStartSeconds = max(0, -project.audio.audioOffsetSeconds)
         let destinationSeconds = max(0, project.audio.audioOffsetSeconds)
         let usableDuration = min(duration.seconds - sourceStartSeconds, timelineDuration - destinationSeconds)
-        guard usableDuration > 0 else { return }
+        guard usableDuration > 0, let compositionTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { return }
         try compositionTrack.insertTimeRange(
             CMTimeRange(
                 start: CMTime(seconds: sourceStartSeconds, preferredTimescale: 600),
@@ -856,13 +636,41 @@ public final class RenderExportEngine: ObservableObject {
 
     private static func videoSegments(for project: CamOrderProject) -> [RenderSegment] {
         var boundaries: Set<Double> = [0, project.timeline.durationSeconds]
-        for lane in project.timeline.lanes where !lane.isMuted {
+        for lane in project.presentationTimeline.lanes where !lane.isMuted {
             for clip in lane.clips where clip.isEnabled {
                 boundaries.insert(clip.timelineStartSeconds)
                 boundaries.insert(clip.timelineStartSeconds + clip.durationSeconds)
+                for marker in clip.automationMarkers {
+                    let markerSeconds = clip.timelineStartSeconds + marker.timeSeconds
+                    if markerSeconds > clip.timelineStartSeconds,
+                       markerSeconds < clip.timelineStartSeconds + clip.durationSeconds {
+                        boundaries.insert(markerSeconds)
+                    }
+                }
+                guard !clip.automationMarkers.isEmpty else { continue }
+                let localAutomationTimes = ([0, clip.durationSeconds] + clip.automationMarkers.map(\.timeSeconds))
+                    .filter { $0.isFinite && $0 >= 0 && $0 <= clip.durationSeconds }
+                    .sorted()
+                let uniqueLocalAutomationTimes = localAutomationTimes.reduce(into: [Double]()) { result, seconds in
+                    guard result.last.map({ abs($0 - seconds) > 0.001 }) ?? true else { return }
+                    result.append(seconds)
+                }
+                for index in 0..<(max(0, uniqueLocalAutomationTimes.count - 1)) {
+                    let start = uniqueLocalAutomationTimes[index]
+                    let end = uniqueLocalAutomationTimes[index + 1]
+                    guard end - start > 0.25 else { continue }
+                    for step in 1..<8 {
+                        let progress = Double(step) / 8.0
+                        boundaries.insert(clip.timelineStartSeconds + start + (end - start) * progress)
+                    }
+                }
             }
         }
-        let sortedBoundaries = boundaries.filter { $0.isFinite && $0 >= 0 }.sorted()
+        // Every composition instruction must meet its neighbour on the same
+        // CMTime tick. Independently rounded start/duration values can leave a
+        // sub-millisecond gap that AVFoundation rejects after an animated cut.
+        let sortedBoundaries = Array(Set(boundaries.filter { $0.isFinite && $0 >= 0 }
+            .map { ($0 * 600).rounded() / 600 })).sorted()
         guard sortedBoundaries.count >= 2 else { return [] }
 
         var segments: [RenderSegment] = []
@@ -870,21 +678,14 @@ public final class RenderExportEngine: ObservableObject {
             let start = sortedBoundaries[index]
             let end = sortedBoundaries[index + 1]
             guard end - start > 0.001 else { continue }
-            guard let clip = topClip(at: start + 0.0005, in: project) else { continue }
+            guard let clip = topClip(at: (start + end) / 2, in: project) else { continue }
             segments.append(RenderSegment(clip: clip, startSeconds: start, durationSeconds: end - start))
         }
         return segments
     }
 
     private static func topClip(at seconds: Double, in project: CamOrderProject) -> VideoClip? {
-        for lane in project.timeline.lanes where !lane.isMuted {
-            if let clip = lane.clips.last(where: { clip in
-                clip.isEnabled && seconds >= clip.timelineStartSeconds && seconds < clip.timelineStartSeconds + clip.durationSeconds
-            }) {
-                return clip
-            }
-        }
-        return nil
+        project.playbackClip(at: seconds)
     }
 
     private static func displaySize(for track: AVAssetTrack) async throws -> CGSize {
@@ -925,6 +726,14 @@ private struct RenderSegment {
     var clip: VideoClip
     var startSeconds: Double
     var durationSeconds: Double
+}
+
+private final class ExportSessionBox: @unchecked Sendable {
+    let session: AVAssetExportSession
+
+    init(_ session: AVAssetExportSession) {
+        self.session = session
+    }
 }
 
 public enum RenderExportError: LocalizedError {

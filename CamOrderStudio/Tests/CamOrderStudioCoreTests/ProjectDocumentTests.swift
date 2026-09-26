@@ -14,7 +14,7 @@ final class ProjectDocumentTests: XCTestCase {
         let opened = try ProjectDocument.open(at: created.folderURL)
 
         XCTAssertEqual(opened.project.name, "Round Trip")
-        XCTAssertEqual(opened.project.timeline.lanes.count, 2)
+        XCTAssertEqual(opened.project.timeline.lanes.count, 3)
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("media/video").path))
     }
 

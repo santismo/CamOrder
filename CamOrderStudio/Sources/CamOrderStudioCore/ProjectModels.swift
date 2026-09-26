@@ -11,6 +11,7 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
     public var audio: MasterAudio
     public var captureLatencyProfiles: [CaptureLatencyProfile]
     public var exportSettings: ExportSettings
+    public var defaultCaptureSourceID: String?
 
     public init(
         projectVersion: Int = 1,
@@ -22,7 +23,8 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
         sync: SyncSettings = SyncSettings(),
         audio: MasterAudio = MasterAudio(),
         captureLatencyProfiles: [CaptureLatencyProfile] = [],
-        exportSettings: ExportSettings = ExportSettings()
+        exportSettings: ExportSettings = ExportSettings(),
+        defaultCaptureSourceID: String? = nil
     ) {
         self.projectVersion = projectVersion
         self.name = name
@@ -34,6 +36,7 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
         self.audio = audio
         self.captureLatencyProfiles = captureLatencyProfiles
         self.exportSettings = exportSettings
+        self.defaultCaptureSourceID = defaultCaptureSourceID
     }
 
     public static func empty(name: String = "Untitled CamOrder Studio Project") -> CamOrderProject {
@@ -41,7 +44,8 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
             name: name,
             timeline: Timeline(lanes: [
                 VideoLane(id: "lane_1", name: "Lane 1"),
-                VideoLane(id: "lane_2", name: "Lane 2")
+                VideoLane(id: "lane_2", name: "Lane 2"),
+                VideoLane(id: "lane_3", name: "Lane 3")
             ])
         )
     }
@@ -105,13 +109,21 @@ public struct VideoLane: Codable, Equatable, Identifiable, Sendable {
     public var isArmed: Bool
     public var isMuted: Bool
     public var clips: [VideoClip]
+    public var videoOffsetMS: Double?
+    public var captureSourceID: String?
+    public var captureSourceName: String?
+    public var captureCrop: [Double]?
 
-    public init(id: String = UUID().uuidString, name: String, isArmed: Bool = false, isMuted: Bool = false, clips: [VideoClip] = []) {
+    public init(id: String = UUID().uuidString, name: String, isArmed: Bool = false, isMuted: Bool = false, clips: [VideoClip] = [], videoOffsetMS: Double? = nil, captureSourceID: String? = nil, captureSourceName: String? = nil, captureCrop: [Double]? = nil) {
         self.id = id
         self.name = name
         self.isArmed = isArmed
         self.isMuted = isMuted
         self.clips = clips
+        self.videoOffsetMS = videoOffsetMS
+        self.captureSourceID = captureSourceID
+        self.captureSourceName = captureSourceName
+        self.captureCrop = captureCrop
     }
 }
 
@@ -394,8 +406,9 @@ public struct SyncSettings: Codable, Equatable, Sendable {
     public var clockDisplayFormat: ClockDisplayFormat?
     public var subtractSMPTEHourOffset: Bool?
     public var defaultPlaybackSyncOffsetSeconds: Double?
+    public var videoOffsetMS: Double?
 
-    public init(mode: SyncMode = .mtc, frameRate: FrameRate = .fps30, lastKnownTimecode: Timecode? = nil, state: LogicSyncState = .disconnected, clockDisplayFormat: ClockDisplayFormat? = .logicTime, subtractSMPTEHourOffset: Bool? = true, defaultPlaybackSyncOffsetSeconds: Double? = 0.333) {
+    public init(mode: SyncMode = .mtc, frameRate: FrameRate = .fps30, lastKnownTimecode: Timecode? = nil, state: LogicSyncState = .disconnected, clockDisplayFormat: ClockDisplayFormat? = .logicTime, subtractSMPTEHourOffset: Bool? = true, defaultPlaybackSyncOffsetSeconds: Double? = 0) {
         self.mode = mode
         self.frameRate = frameRate
         self.lastKnownTimecode = lastKnownTimecode ?? Timecode(hours: 0, minutes: 0, seconds: 0, frames: 0, frameRate: frameRate)
@@ -501,9 +514,9 @@ public enum ExportAudioMode: String, Codable, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .masteredOnly: return "Mastered audio only"
-        case .cameraOnly: return "Camera audio only"
-        case .masteredAndCamera: return "Mastered + camera audio"
-        case .muteAll: return "Mute all"
+        case .cameraOnly: return "Imported clip audio"
+        case .masteredAndCamera: return "Mastered + imported clip audio"
+        case .muteAll: return "Silent movie (for Logic)"
         }
     }
 }
@@ -516,7 +529,7 @@ public struct ExportSettings: Codable, Equatable, Sendable {
     public var canvasWidth: Int?
     public var canvasHeight: Int?
 
-    public init(container: ExportContainer = .mov, resolution: ExportResolution = .hd1080, frameRate: FrameRate = .fps30, audioMode: ExportAudioMode = .masteredOnly, canvasWidth: Int? = 1920, canvasHeight: Int? = 1080) {
+    public init(container: ExportContainer = .mov, resolution: ExportResolution = .hd1080, frameRate: FrameRate = .fps30, audioMode: ExportAudioMode = .muteAll, canvasWidth: Int? = 1920, canvasHeight: Int? = 1080) {
         self.container = container
         self.resolution = resolution
         self.frameRate = frameRate

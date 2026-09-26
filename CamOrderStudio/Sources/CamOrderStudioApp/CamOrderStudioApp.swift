@@ -8,7 +8,7 @@ struct CamOrderStudioApp: App {
         WindowGroup {
             StudioShellView()
                 .environmentObject(projectStore)
-                .frame(minWidth: 1120, minHeight: 720)
+                .frame(minWidth: 760, minHeight: 440)
         }
         .commands {
             CommandGroup(replacing: .newItem) {

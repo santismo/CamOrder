@@ -1,3 +1,5 @@
+> Historical standalone-app planning document. Some proposals were superseded by the Studio AU. See the [current guide](../CamOrderStudio/README-AU.md) and [application history](HISTORY.md).
+
 # CamOrder Studio Plan
 
 ## Current CamOrder architecture

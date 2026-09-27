@@ -15,34 +15,49 @@ public struct HostTransportMonitor {
     private var lastSeconds = 0.0
     private var stopCandidate: Double?
     private var rewindCandidate: Double?
+    private var stoppedSeconds = 0.0
     public init() {}
     public mutating func update(seconds: Double, reportedPlaying: Bool, valid: Bool, reportTime: Double, now: Double) -> Update {
         var event = Event.none
         let newReport = valid && seconds.isFinite && reportTime != lastReportTime
         if newReport {
             let previous = lastSeconds
-            let advanced = seconds > previous + 0.001
-            let rewound = playing && seconds < previous - 0.25
             let reportIsRecent = now - reportTime < 1
+            let position = max(0, seconds)
             if reportedPlaying {
                 stopCandidate = nil
                 if !playing && reportIsRecent { playing = true; event = .started }
-                if rewound, rewindCandidate == nil { rewindCandidate = seconds }
-                else if let candidate = rewindCandidate {
-                    if seconds < previous + 0.5 && seconds >= candidate && reportIsRecent { event = .relocated }
+                if event != .started && playing && position < previous - 0.25 {
+                    if let candidate = rewindCandidate, position >= candidate - 0.05, position < candidate + 0.5, reportIsRecent {
+                        event = .relocated
+                        lastSeconds = position
+                        rewindCandidate = nil
+                    } else {
+                        // Do not publish the first suspect zero/backward report.
+                        // A transient callback must not jump the cursor or viewport.
+                        rewindCandidate = position
+                    }
+                } else {
                     rewindCandidate = nil
+                    lastSeconds = position
                 }
             } else if playing && reportIsRecent {
-                // Allow 200 ms for a transient stopped report to recover. Advancing
-                // position postpones confirmation even if the playing flag is false.
-                if advanced || rewound || stopCandidate == nil { stopCandidate = now }
+                if stopCandidate == nil || abs(position - stoppedSeconds) > 0.001 { stopCandidate = now }
+                stoppedSeconds = position
+                // Keep the last valid rolling position until Stop is confirmed.
+                if position >= previous { lastSeconds = position }
+                rewindCandidate = nil
+            } else if !playing {
+                lastSeconds = position
+                rewindCandidate = nil
             }
             lastReportTime = reportTime
-            lastSeconds = max(0, seconds)
         }
         if playing, let since = stopCandidate, now - since >= 0.2 {
             playing = false; event = .stopped; stopCandidate = nil
+            lastSeconds = stoppedSeconds
         }
+
         let age = lastReportTime.map { max(0, now - $0) } ?? 0
         let delayed = playing && age > 0.5
         // Unknown transport must never invent a moving playhead. Keep an active

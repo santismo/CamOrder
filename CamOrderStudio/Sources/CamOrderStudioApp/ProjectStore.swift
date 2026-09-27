@@ -17,6 +17,8 @@ final class ProjectStore: ObservableObject {
     }
 
     var isHosted = false
+    var framingPlayheadSeconds: (() -> Double)?
+    private var framingEditTime: (clipID: String, localSeconds: Double)?
     var onDocumentChange: (() -> Void)?
     @Published var lastExportURL: URL?
     @Published var document: ProjectDocument?
@@ -186,7 +188,6 @@ final class ProjectStore: ObservableObject {
     func unarmAllLanes() {
         guard var document else { return }
         guard document.project.timeline.lanes.contains(where: { $0.isArmed }) else { return }
-        registerUndo(project: document.project)
         for index in document.project.timeline.lanes.indices {
             document.project.timeline.lanes[index].isArmed = false
         }
@@ -513,8 +514,12 @@ final class ProjectStore: ObservableObject {
     func renameLane(_ laneId: String, name: String) {
         guard var document else { return }
         guard let index = document.project.timeline.lanes.firstIndex(where: { $0.id == laneId }) else { return }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, document.project.timeline.lanes[index].name != name else { return }
+        registerUndo(project: document.project)
         document.project.timeline.lanes[index].name = name
         self.document = document
+        saveProject()
     }
 
     func deleteLane(_ laneId: String) {
@@ -809,8 +814,22 @@ final class ProjectStore: ObservableObject {
     }
 
     func beginClipFramingEdit(_ clipId: String) {
-        guard let document, clip(id: clipId) != nil else { return }
+        guard let document, let clip = clip(id: clipId) else { return }
+        framingEditTime = nil
+        framingEditTime = (clipId, framingLocalSeconds(for: clip))
         registerUndo(project: document.project)
+    }
+
+    func endClipFramingEdit() { framingEditTime = nil; saveProject() }
+
+    func framingLocalSeconds(for clip: VideoClip) -> Double {
+        if let edit = framingEditTime, edit.clipID == clip.id { return edit.localSeconds }
+        return min(clip.durationSeconds, max(0, (framingPlayheadSeconds?() ?? clip.timelineStartSeconds)
+            - project.presentedClip(clip).timelineStartSeconds))
+    }
+
+    func framingForEditing(_ clip: VideoClip) -> ClipFraming {
+        clip.automatedFraming(atLocalSecond: framingLocalSeconds(for: clip))
     }
 
     func updateSelectedClipFraming(zoom: Double? = nil, offsetX: Double? = nil, offsetY: Double? = nil, rotationDegrees: Double? = nil, trackUndo: Bool = true, save: Bool = false, origin: FramingEditOrigin = .inspector) {
@@ -827,15 +846,19 @@ final class ProjectStore: ObservableObject {
             guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == clipId }) else { continue }
             if trackUndo { registerUndo(project: document.project) }
             var clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
-            let reference = referenceLocalSeconds.map { clip.automatedFraming(atLocalSecond: $0) } ?? clip.framing ?? ClipFraming()
+            let localSeconds = referenceLocalSeconds ?? framingLocalSeconds(for: clip)
+            let reference = clip.automatedFraming(atLocalSecond: localSeconds)
             var target = reference
             if let zoom { target.zoom = min(16, max(0.25, zoom)) }
             if let offsetX { target.offsetX = min(8, max(-8, offsetX)) }
             if let offsetY { target.offsetY = min(8, max(-8, offsetY)) }
             if let rotationDegrees { target.rotationDegrees = rotationDegrees }
-            // Reframe the whole curve. Explicit marker controls still author animation;
-            // ordinary pan/zoom must not spring back to an unchanged keyframe.
-            clip.reframe(from: reference, to: target)
+            if clip.automationMarkers.isEmpty {
+                clip.framing = target
+            } else {
+                // With animation enabled, edit the pose at this time, not every key.
+                clip.setAutomationFraming(target, atLocalSecond: localSeconds)
+            }
             document.project.timeline.lanes[laneIndex].clips[clipIndex] = clip
             self.document = document
             latestFramingEdit = FramingEditEvent(clipId: clipId, origin: origin, revision: (latestFramingEdit?.revision ?? 0) + 1)
@@ -1024,16 +1047,7 @@ final class ProjectStore: ObservableObject {
         var clip = document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex]
         let localSeconds = min(max(0, timelineSeconds - document.project.presentedClip(clip).timelineStartSeconds), clip.durationSeconds)
         let markerFraming = explicitFraming ?? clip.automatedFraming(atLocalSecond: localSeconds)
-        let tolerance = max(0.02, 0.5 / max(1, clip.frameRate.framesPerSecond))
-        if let markerIndex = clip.automationMarkers.firstIndex(where: { abs($0.timeSeconds - localSeconds) <= tolerance }) {
-            clip.automationMarkers[markerIndex].timeSeconds = localSeconds
-            clip.automationMarkers[markerIndex].framing = markerFraming
-        } else {
-            clip.automationMarkers.append(
-                ClipAutomationMarker(timeSeconds: localSeconds, framing: markerFraming)
-            )
-        }
-        clip.automationMarkers.sort { $0.timeSeconds < $1.timeSeconds }
+        clip.setAutomationFraming(markerFraming, atLocalSecond: localSeconds)
         document.project.timeline.lanes[location.laneIndex].clips[location.clipIndex] = clip
         self.document = document
         selectedClipId = clip.id
@@ -1139,11 +1153,10 @@ final class ProjectStore: ObservableObject {
     }
 
     func undoProjectChange() {
-        guard !hasCaptureActivity, !hasArmedLane else { return }
         guard var document, let previous = undoStack.popLast() else { return }
+        framingEditTime = nil
         redoStack.append(document.project)
-        document.project = previous
-        for index in document.project.timeline.lanes.indices { document.project.timeline.lanes[index].isArmed = false }
+        document.project = restoringHistory(previous, preservingRuntimeFrom: document.project)
         self.document = document
         reconcileSelection()
         updateUndoRedoState()
@@ -1151,15 +1164,34 @@ final class ProjectStore: ObservableObject {
     }
 
     func redoProjectChange() {
-        guard !hasCaptureActivity, !hasArmedLane else { return }
         guard var document, let next = redoStack.popLast() else { return }
+        framingEditTime = nil
         undoStack.append(document.project)
-        document.project = next
-        for index in document.project.timeline.lanes.indices { document.project.timeline.lanes[index].isArmed = false }
+        document.project = restoringHistory(next, preservingRuntimeFrom: document.project)
         self.document = document
         reconcileSelection()
         updateUndoRedoState()
         saveProject()
+    }
+
+    private func restoringHistory(_ snapshot: CamOrderProject, preservingRuntimeFrom current: CamOrderProject) -> CamOrderProject {
+        var restored = snapshot
+        // Arm state and capture connections are live controls, never undoable edits.
+        for index in restored.timeline.lanes.indices {
+            let id = restored.timeline.lanes[index].id
+            let live = current.timeline.lanes.first { $0.id == id }
+            restored.timeline.lanes[index].isArmed = live?.isArmed ?? false
+            if let live, live.isArmed || laneIsBusy(id) {
+                restored.timeline.lanes[index].captureSourceID = live.captureSourceID
+                restored.timeline.lanes[index].captureSourceName = live.captureSourceName
+                restored.timeline.lanes[index].captureCrop = live.captureCrop
+            }
+        }
+        for (index, lane) in current.timeline.lanes.enumerated() where (lane.isArmed || laneIsBusy(lane.id)) && !restored.timeline.lanes.contains(where: { $0.id == lane.id }) {
+            restored.timeline.lanes.insert(lane, at: min(index, restored.timeline.lanes.count))
+        }
+        if hasArmedLane || hasCaptureActivity { restored.defaultCaptureSourceID = current.defaultCaptureSourceID }
+        return restored
     }
 
     func selectedClip() -> VideoClip? {

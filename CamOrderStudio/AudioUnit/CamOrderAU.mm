@@ -67,6 +67,7 @@ void COSetSession(COBridge *b, CFTypeRef session) {
     b->session = session;
 }
 
+extern "C" void CamOrderEnsureSession(COBridge *bridge);
 extern "C" void *CamOrderCreateView(COBridge *bridge);
 extern "C" void CamOrderCloseSession(CFTypeRef session);
 @interface CamOrderStudioAUViewFactory : NSObject <AUCocoaUIBase>
@@ -102,6 +103,21 @@ public:
             COSetSession(retained, nullptr);
             COReleaseBridge(retained);
         });
+    }
+    void ensureSession() {
+        auto retained = bridge;
+        CORetainBridge(retained);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (COBridgeIsAlive(retained)) CamOrderEnsureSession(retained);
+            COReleaseBridge(retained);
+        });
+    }
+    OSStatus Initialize() override {
+        auto result = AUEffectBase::Initialize();
+        auto state = COCopyState(bridge);
+        if (result == noErr && state && CFDataGetLength(state) > 0) ensureSession();
+        if (state) CFRelease(state);
+        return result;
     }
     UInt32 SupportedNumChannels(const AUChannelInfo **info) override {
         static const AUChannelInfo channels[] = {{1,1}, {2,2}};
@@ -207,6 +223,7 @@ public:
         auto state = (CFDataRef)CFDictionaryGetValue((CFDictionaryRef)data, CFSTR("CamOrderProject"));
         if (state && CFGetTypeID(state) != CFDataGetTypeID()) return kAudioUnitErr_InvalidPropertyValue;
         COSetState(bridge, state);
+        if (state && CFDataGetLength(state) > 0) ensureSession();
         return noErr;
     }
 };

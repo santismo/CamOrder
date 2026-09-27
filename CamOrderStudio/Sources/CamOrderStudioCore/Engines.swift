@@ -9,6 +9,15 @@ public final class LogicSyncEngine: ObservableObject {
     @Published public private(set) var currentTimecode = Timecode(hours: 0, minutes: 0, seconds: 0, frames: 0, frameRate: .fps30)
     @Published public private(set) var displayTimecode = Timecode(hours: 0, minutes: 0, seconds: 0, frames: 0, frameRate: .fps30)
     @Published public private(set) var displaySeconds: Double = 0
+    @Published public private(set) var previewSeconds: Double?
+    public var editorSeconds: Double { previewSeconds ?? displaySeconds }
+
+    /// A stopped preview never changes the host transport or recording clock.
+    public func preview(at seconds: Double) {
+        guard !isTransportRolling, seconds.isFinite else { return }
+        previewSeconds = max(0, seconds)
+    }
+    public func followHost() { if previewSeconds != nil { previewSeconds = nil } }
     @Published public private(set) var connectedSourceNames: [String] = []
     @Published public private(set) var lastErrorMessage: String?
     @Published public private(set) var detectedTempoBPM: Double?
@@ -49,6 +58,7 @@ public final class LogicSyncEngine: ObservableObject {
         guard isHosted else { return }
         let wasRolling = isTransportRolling
         let position = max(0, seconds.isFinite ? seconds : 0)
+        if playing || abs(position - displaySeconds) > 0.001 { followHost() }
         let time = Timecode.from(seconds: position, frameRate: .fps30)
         if currentTimecode != time { currentTimecode = time }
         if displayTimecode != time { displayTimecode = time }
@@ -429,17 +439,17 @@ public final class RenderExportEngine: ObservableObject {
         videoComposition.renderSize = renderSize
         videoComposition.frameDuration = frameDuration
 
-        guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-            throw RenderExportError.couldNotCreateVideoTrack
-        }
         let allSegments = Self.videoSegments(for: project)
-        let exportStart = range?.startSeconds ?? (fromFirstClip ? (allSegments.first?.startSeconds ?? 0) : 0)
-        let exportEnd = range?.endSeconds ?? (allSegments.map { $0.startSeconds + $0.durationSeconds }.max() ?? 0)
+        let edited = Self.editedRange(in: project)
+        // Keep the file anchored to the edited range BEFORE sync adjustments.
+        // Offsets move content inside this fixed window, not the import position.
+        let exportStart = range?.startSeconds ?? (fromFirstClip ? (edited?.startSeconds ?? 0) : 0)
+        let exportEnd = range?.endSeconds ?? edited?.endSeconds ?? 0
         let segments = allSegments.compactMap { segment -> RenderSegment? in
             let start = max(exportStart, segment.startSeconds)
             let end = min(exportEnd, segment.startSeconds + segment.durationSeconds)
             guard end > start else { return nil }
-            return RenderSegment(clip: segment.clip, startSeconds: start, durationSeconds: end - start)
+            return RenderSegment(clips: segment.clips, startSeconds: start, durationSeconds: end - start)
         }
         guard exportEnd > exportStart else { throw RenderExportError.noRenderableVideo }
         // Export never overwrites project media, even if the save panel points at it.
@@ -462,63 +472,64 @@ public final class RenderExportEngine: ObservableObject {
             cursor = end
         }
         var maxVideoEndSeconds: Double = 0
+        var videoTracks: [String: AVMutableCompositionTrack] = [:]
+        var audioTracks: [String: AVMutableCompositionTrack] = [:]
+        var sources: [String: (asset: AVURLAsset, video: AVAssetTrack, audio: AVAssetTrack?, duration: Double, size: CGSize)] = [:]
         for segment in segments {
-            guard let asset = project.media.first(where: { $0.id == segment.clip.mediaAssetId }) else {
-                throw NSError(domain: "CamOrderExport", code: 2, userInfo: [NSLocalizedDescriptionKey: "A timeline clip is missing its media reference."])
-            }
-            let sourceAsset = AVURLAsset(url: folderURL.appendingPathComponent(asset.relativePath))
-            guard let sourceTrack = try await sourceAsset.loadTracks(withMediaType: .video).first else {
-                throw NSError(domain: "CamOrderExport", code: 3, userInfo: [NSLocalizedDescriptionKey: "No readable video track in \(asset.displayName)."])
-            }
-
-            let sourceDuration = try await sourceAsset.load(.duration)
-            let sourceStartSeconds = max(0, segment.clip.trimInSeconds + segment.startSeconds - segment.clip.timelineStartSeconds + (segment.clip.playbackSyncOffsetSeconds ?? project.sync.defaultPlaybackSyncOffsetSeconds ?? 0))
-            let availableSeconds = max(0, sourceDuration.seconds - sourceStartSeconds)
-            let segmentDurationSeconds = min(segment.durationSeconds, availableSeconds)
-            guard segmentDurationSeconds > 0 else { continue }
-
             let destinationTime = movieTime(segment.startSeconds - exportStart)
-            let destinationEnd = movieTime(segment.startSeconds + segmentDurationSeconds - exportStart)
-            let sourceRange = CMTimeRange(start: movieTime(sourceStartSeconds), duration: CMTimeSubtract(destinationEnd, destinationTime))
-            guard sourceRange.duration.value > 0 else { continue }
-            try videoTrack.insertTimeRange(sourceRange, of: sourceTrack, at: destinationTime)
-
-            if project.exportSettings.audioMode == .cameraOnly || project.exportSettings.audioMode == .masteredAndCamera,
-               let sourceAudioTrack = try await sourceAsset.loadTracks(withMediaType: .audio).first,
-               let compositionAudioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try? compositionAudioTrack.insertTimeRange(sourceRange, of: sourceAudioTrack, at: destinationTime)
-            }
-
-            let sourceSize = try await Self.displaySize(for: sourceTrack)
-            let startTransform = try await Self.transform(
-                for: sourceTrack,
-                sourceSize: sourceSize,
-                renderSize: renderSize,
-                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds)
-            )
-            let endTransform = try await Self.transform(
-                for: sourceTrack,
-                sourceSize: sourceSize,
-                renderSize: renderSize,
-                framing: segment.clip.automatedFraming(atTimelineSecond: segment.startSeconds + segmentDurationSeconds)
-            )
-            let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-            layerInstruction.setTransformRamp(
-                fromStart: startTransform,
-                toEnd: endTransform,
-                timeRange: CMTimeRange(
-                    start: destinationTime,
-                    duration: sourceRange.duration
-                )
-            )
-            appendGap(until: destinationTime.seconds)
+            let segmentEnd = movieTime(segment.startSeconds + segment.durationSeconds - exportStart)
             let instruction = AVMutableVideoCompositionInstruction()
-            instruction.timeRange = CMTimeRange(start: destinationTime, duration: sourceRange.duration)
+            instruction.timeRange = CMTimeRange(start: destinationTime, end: segmentEnd)
             instruction.backgroundColor = CGColor(gray: 0, alpha: 1)
-            instruction.layerInstructions = [layerInstruction]
+            var layers: [AVVideoCompositionLayerInstruction] = []
+            // AVFoundation lists foreground layers first, matching lane order.
+            for clip in segment.clips {
+                if sources[clip.mediaAssetId] == nil {
+                    guard let asset = project.media.first(where: { $0.id == clip.mediaAssetId }) else {
+                        throw NSError(domain: "CamOrderExport", code: 2, userInfo: [NSLocalizedDescriptionKey: "A timeline clip is missing its media reference."])
+                    }
+                    let sourceAsset = AVURLAsset(url: folderURL.appendingPathComponent(asset.relativePath))
+                    guard let track = try await sourceAsset.loadTracks(withMediaType: .video).first else {
+                        throw NSError(domain: "CamOrderExport", code: 3, userInfo: [NSLocalizedDescriptionKey: "No readable video track in \(asset.displayName)."])
+                    }
+                    sources[clip.mediaAssetId] = (sourceAsset, track, try await sourceAsset.loadTracks(withMediaType: .audio).first,
+                        try await sourceAsset.load(.duration).seconds, try await Self.displaySize(for: track))
+                }
+                guard let source = sources[clip.mediaAssetId] else { continue }
+                let sourceStart = max(0, clip.trimInSeconds + segment.startSeconds - clip.timelineStartSeconds
+                    + (clip.playbackSyncOffsetSeconds ?? project.sync.defaultPlaybackSyncOffsetSeconds ?? 0))
+                let duration = min(segment.durationSeconds, max(0, source.duration - sourceStart))
+                guard duration > 0 else { continue }
+                if videoTracks[clip.armedLaneId] == nil {
+                    videoTracks[clip.armedLaneId] = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+                }
+                guard let videoTrack = videoTracks[clip.armedLaneId] else { throw RenderExportError.couldNotCreateVideoTrack }
+                let destinationEnd = movieTime(segment.startSeconds + duration - exportStart)
+                let sourceRange = CMTimeRange(start: movieTime(sourceStart), duration: CMTimeSubtract(destinationEnd, destinationTime))
+                guard sourceRange.duration.value > 0 else { continue }
+                try videoTrack.insertTimeRange(sourceRange, of: source.video, at: destinationTime)
+                if project.exportSettings.audioMode == .cameraOnly || project.exportSettings.audioMode == .masteredAndCamera,
+                   let audio = source.audio {
+                    if audioTracks[clip.armedLaneId] == nil {
+                        audioTracks[clip.armedLaneId] = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+                    }
+                    if let audioTrack = audioTracks[clip.armedLaneId] { try audioTrack.insertTimeRange(sourceRange, of: audio, at: destinationTime) }
+                }
+                let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+                layer.setTransformRamp(
+                    fromStart: try await Self.transform(for: source.video, sourceSize: source.size, renderSize: renderSize,
+                        framing: clip.automatedFraming(atTimelineSecond: segment.startSeconds)),
+                    toEnd: try await Self.transform(for: source.video, sourceSize: source.size, renderSize: renderSize,
+                        framing: clip.automatedFraming(atTimelineSecond: segment.startSeconds + duration)),
+                    timeRange: CMTimeRange(start: destinationTime, duration: sourceRange.duration))
+                if destinationEnd < segmentEnd { layer.setOpacity(0, at: destinationEnd) }
+                layers.append(layer)
+                maxVideoEndSeconds = max(maxVideoEndSeconds, destinationEnd.seconds)
+            }
+            appendGap(until: destinationTime.seconds)
+            instruction.layerInstructions = layers
             instructions.append(instruction)
-            cursor = CMTimeAdd(destinationTime, sourceRange.duration).seconds
-            maxVideoEndSeconds = max(maxVideoEndSeconds, cursor)
+            cursor = segmentEnd.seconds
         }
 
         guard maxVideoEndSeconds > 0 else {
@@ -571,13 +582,14 @@ public final class RenderExportEngine: ObservableObject {
     }
 
     public static func editedRange(in project: CamOrderProject) -> MovieExportRange? {
-        let segments = videoSegments(for: project)
-        guard let first = segments.first, let last = segments.last else { return nil }
-        return MovieExportRange(startSeconds: first.startSeconds, endSeconds: last.startSeconds + last.durationSeconds)
+        let clips = project.timeline.lanes.filter { !$0.isMuted }.flatMap(\.clips).filter(\.isEnabled)
+        guard let start = clips.map(\.timelineStartSeconds).min(),
+              let end = clips.map({ $0.timelineStartSeconds + $0.durationSeconds }).max() else { return nil }
+        return MovieExportRange(startSeconds: start, endSeconds: end)
     }
 
     public static func firstVisibleClipSeconds(in project: CamOrderProject) -> Double {
-        videoSegments(for: project).first?.startSeconds ?? 0
+        editedRange(in: project)?.startSeconds ?? 0
     }
 
     private func insertMasterAudioIfNeeded(project: CamOrderProject, folderURL: URL, composition: AVMutableComposition, outputDuration: Double) async throws {
@@ -678,8 +690,9 @@ public final class RenderExportEngine: ObservableObject {
             let start = sortedBoundaries[index]
             let end = sortedBoundaries[index + 1]
             guard end - start > 0.001 else { continue }
-            guard let clip = topClip(at: (start + end) / 2, in: project) else { continue }
-            segments.append(RenderSegment(clip: clip, startSeconds: start, durationSeconds: end - start))
+            let clips = project.playbackClips(at: (start + end) / 2)
+            guard !clips.isEmpty else { continue }
+            segments.append(RenderSegment(clips: clips, startSeconds: start, durationSeconds: end - start))
         }
         return segments
     }
@@ -705,14 +718,17 @@ public final class RenderExportEngine: ObservableObject {
         let scaledWidth = sourceSize.width * scale
         let scaledHeight = sourceSize.height * scale
         let translateX = (renderSize.width - scaledWidth) / 2 + CGFloat(framing.offsetX) * renderSize.width * 0.5
-        let translateY = (renderSize.height - scaledHeight) / 2 - CGFloat(framing.offsetY) * renderSize.height * 0.5
+        // Video-composition coordinates run down from the top; the native
+        // preview layer runs up from the bottom. Match the user's downward pan.
+        let translateY = (renderSize.height - scaledHeight) / 2 + CGFloat(framing.offsetY) * renderSize.height * 0.5
         var transform = preferredTransform
             .concatenating(normalize)
             .concatenating(CGAffineTransform(scaleX: scale, y: scale))
             .concatenating(CGAffineTransform(translationX: translateX, y: translateY))
-        let radians = CGFloat(framing.rotationDegrees * .pi / 180)
+        let radians = CGFloat(-framing.rotationDegrees * .pi / 180)
         if abs(radians) > 0.0001 {
-            let center = CGPoint(x: renderSize.width / 2, y: renderSize.height / 2)
+            let center = CGPoint(x: renderSize.width / 2 + CGFloat(framing.offsetX) * renderSize.width * 0.5,
+                                 y: renderSize.height / 2 + CGFloat(framing.offsetY) * renderSize.height * 0.5)
             transform = transform
                 .concatenating(CGAffineTransform(translationX: -center.x, y: -center.y))
                 .concatenating(CGAffineTransform(rotationAngle: radians))
@@ -723,7 +739,7 @@ public final class RenderExportEngine: ObservableObject {
 }
 
 private struct RenderSegment {
-    var clip: VideoClip
+    var clips: [VideoClip]
     var startSeconds: Double
     var durationSeconds: Double
 }

@@ -178,7 +178,7 @@ final class TimelineEditingTests: XCTestCase {
         project.sync.videoOffsetMS = -100
         project.timeline.lanes[0].videoOffsetMS = 50
         let range = try XCTUnwrap(RenderExportEngine.editedRange(in: project))
-        XCTAssertEqual(range.startSeconds, 3.45, accuracy: 0.001)
+        XCTAssertEqual(range.startSeconds, 3.5, accuracy: 0.001)
         let output = folder.appendingPathComponent("edited.mov")
         let engine = RenderExportEngine()
         try await engine.export(project: project, from: folder, to: output, range: range)

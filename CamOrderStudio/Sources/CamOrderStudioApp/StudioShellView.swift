@@ -6,7 +6,7 @@ import Combine
 import UniformTypeIdentifiers
 
 @MainActor
-private final class EditPlaybackController: ObservableObject {
+final class EditPlaybackController: ObservableObject {
     @Published var isEditMode = false
     @Published var isPlaying = false
     @Published var playheadSeconds: Double = 0
@@ -19,6 +19,13 @@ private final class EditPlaybackController: ObservableObject {
     deinit {
         timer?.invalidate()
         audioPlayer?.pause()
+    }
+
+    func seconds(sync: LogicSyncEngine) -> Double {
+        sync.isHosted ? sync.editorSeconds : (isEditMode ? playheadSeconds : sync.displaySeconds)
+    }
+    func playing(sync: LogicSyncEngine) -> Bool {
+        sync.isHosted ? sync.isTransportRolling : (isEditMode ? isPlaying : sync.isTransportRolling)
     }
 
     func togglePlay(duration: Double) {
@@ -167,7 +174,7 @@ struct StudioShellView: View {
                     } else { monitors }
                 }.padding(.horizontal, 8)
                 HStack {
-                    Text("CamOrder · AU 0.4.0").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.5.0").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -196,7 +203,9 @@ struct StudioShellView: View {
         .onAppear {
             syncEngine.startMTCInput()
             syncEngine.setTempoBPM(store.tempoBPM)
+            store.framingPlayheadSeconds = { editPlayback.seconds(sync: syncEngine) }
         }
+        .onDisappear { if syncEngine.isHosted { syncEngine.followHost() }; editPlayback.pause() }
         .onChange(of: store.tempoBPM) { bpm in
             syncEngine.setTempoBPM(bpm)
         }
@@ -241,6 +250,7 @@ struct StudioShellView: View {
     }
 
     private func sendHostKey(_ code: UInt16, text: String) {
+        syncEngine.followHost()
         if let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: NSApp.keyWindow?.windowNumber ?? 0, context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: code) {
             _ = hostTransportKey?(event)
@@ -248,7 +258,7 @@ struct StudioShellView: View {
     }
 
     private func configureEditAudio() {
-        guard editPlayback.isEditMode,
+        guard !syncEngine.isHosted, editPlayback.isEditMode,
               let relativePath = store.project.audio.masteredAudioFile,
               let url = store.absoluteURL(for: relativePath) else {
             editPlayback.configureMasterAudio(url: nil, audioOffsetSeconds: store.project.audio.audioOffsetSeconds)
@@ -260,9 +270,9 @@ struct StudioShellView: View {
     private func handleKey(_ event: NSEvent) -> Bool {
         let modifierFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if syncEngine.isHosted, modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
-           event.keyCode == 15 || (event.keyCode == 49 && !editPlayback.isEditMode) {
+           event.keyCode == 15 || event.keyCode == 49 {
             if event.isARepeat { return true }
-            if event.keyCode == 15 { editPlayback.pause(); editPlayback.isEditMode = false }
+            syncEngine.followHost(); editPlayback.pause(); editPlayback.isEditMode = false
             return hostTransportKey?(event) ?? false
         }
         if modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "z" {
@@ -283,6 +293,14 @@ struct StudioShellView: View {
             return true
         }
 
+        if syncEngine.isHosted {
+            if event.keyCode == 8 { store.cutSelectedClip(at: activePlayheadSeconds); return true }
+            if !syncEngine.isTransportRolling && (event.keyCode == 123 || event.keyCode == 124) {
+                syncEngine.preview(at: activePlayheadSeconds + (event.keyCode == 123 ? -store.gridSeconds : store.gridSeconds))
+                return true
+            }
+            return false
+        }
         guard editPlayback.isEditMode else { return false }
 
         switch event.keyCode {
@@ -310,7 +328,7 @@ struct StudioShellView: View {
     }
 
     private var activePlayheadSeconds: Double {
-        editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+        editPlayback.seconds(sync: syncEngine)
     }
 }
 
@@ -455,7 +473,7 @@ private struct LogicLinkSetupView: View {
                 ForEach(0..<24) { hour in Text(String(format: "%02d:00:00:00", hour)).tag(hour) }
             }
             Text("Match Logic’s bar-1 SMPTE time in Synchronization → General; the default is 01:00:00:00. This is the project origin, not a video-delay adjustment.").font(.caption).foregroundStyle(.secondary)
-            Text("R and the red button use Logic’s R key command. Space controls Logic in Follow Logic mode. Edit preview is local.").font(.caption)
+            Text("R and Record start Logic recording. Space and Play control Logic. Scrub the CamOrder ruler while stopped to preview an edit; Logic takes over on its next move or Play.").font(.caption)
             Text("While stopped, CamOrder follows position reports sent by Logic. If a move is not sent, press Stop twice to send a Locate command (enable that option in Logic’s MIDI Sync settings).").font(.caption).foregroundStyle(.secondary)
         }.padding(18).frame(width: 420)
             .onChange(of: syncEngine.timecodeOriginHours) { _ in store.onDocumentChange?() }
@@ -553,24 +571,23 @@ private struct TransportSyncBar: View {
         }
     }
     @ViewBuilder private var editControls: some View {
-        Picker("Transport", selection: $editPlayback.isEditMode) {
-            Text(syncEngine.isHosted ? "Logic" : "Sync").tag(false)
-            Text("Edit").tag(true)
-        }.pickerStyle(.segmented).labelsHidden().frame(width: 100)
-            .disabled(syncEngine.isHosted && store.hasArmedLane)
-            .help("Logic follows the host; Edit previews locally while disarmed")
-        if syncEngine.isHosted, !editPlayback.isEditMode, let recordInHost {
+        if !syncEngine.isHosted {
+            Picker("Transport", selection: $editPlayback.isEditMode) {
+                Text("Sync").tag(false); Text("Edit").tag(true)
+            }.pickerStyle(.segmented).labelsHidden().frame(width: 100)
+        }
+        if syncEngine.isHosted, let recordInHost {
             Button(action: recordInHost) { Image(systemName: "record.circle").foregroundStyle(.red) }
                 .help("Record in Logic (R)")
         }
         Button {
-            if syncEngine.isHosted && !editPlayback.isEditMode { playInHost?() }
+            if syncEngine.isHosted { syncEngine.followHost(); playInHost?() }
             else { editPlayback.togglePlay(duration: max(store.project.timeline.durationSeconds, activePlayheadSeconds + 10)) }
         } label: {
-            Image(systemName: (editPlayback.isEditMode ? editPlayback.isPlaying : syncEngine.isTransportRolling) ? "pause.fill" : "play.fill")
+            Image(systemName: (editPlayback.playing(sync: syncEngine)) ? "pause.fill" : "play.fill")
         }.disabled(!store.hasOpenProject).help("Play / pause")
         Button {
-            if syncEngine.isHosted && !editPlayback.isEditMode { if syncEngine.isTransportRolling { playInHost?() } }
+            if syncEngine.isHosted { syncEngine.followHost(); if syncEngine.isTransportRolling { playInHost?() } }
             else { editPlayback.stop() }
         } label: { Image(systemName: "stop.fill") }.help("Stop")
         Button { store.undoProjectChange() } label: { Image(systemName: "arrow.uturn.backward") }.disabled(!store.canUndo).help("Undo")
@@ -578,7 +595,7 @@ private struct TransportSyncBar: View {
     }
 
     private var activePlayheadSeconds: Double {
-        editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+        editPlayback.seconds(sync: syncEngine)
     }
 
     private func startVideoTake() {
@@ -766,29 +783,25 @@ private struct PlaybackPreviewPane: View {
     @State private var liveCanvasPixelSize: CGSize?
 
     private var playheadSeconds: Double {
-        editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+        editPlayback.seconds(sync: syncEngine)
     }
 
     private var isPlaying: Bool {
-        editPlayback.isEditMode ? editPlayback.isPlaying : syncEngine.isTransportRolling
+        editPlayback.playing(sync: syncEngine)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                SectionHeader(editPlayback.isEditMode ? "Main Stage · Edit" : "Main Stage")
+                SectionHeader("Main Stage")
                 Spacer()
-                if editPlayback.isEditMode {
-                    Text(canvasLabel)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.trailing, 8)
-                }
+                Text(canvasLabel)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.trailing, 8)
             }
-            if let clip = store.playbackClip(at: playheadSeconds),
-               let asset = store.mediaAsset(for: clip),
-                      let url = store.absoluteURL(for: asset),
-                      FileManager.default.fileExists(atPath: url.path) {
+            let clips = store.project.playbackClips(at: playheadSeconds)
+            if !clips.isEmpty {
                 GeometryReader { geometry in
                     let canvasPixels = liveCanvasPixelSize ?? projectCanvasPixelSize
                     let canvasSize = canvasDisplaySize(in: geometry.size, canvasPixels: canvasPixels)
@@ -796,21 +809,12 @@ private struct PlaybackPreviewPane: View {
                     ZStack {
                         Color.black
                         PlaybackCanvasView(
-                            previewSize: previewSize,
-                            canvasSize: canvasSize,
-                            canvasPixelSize: canvasPixels,
-                            clip: clip,
-                            url: url,
-                            playbackSyncOffsetSeconds: store.effectivePlaybackSyncOffsetSeconds(for: clip),
-                            playheadSeconds: playheadSeconds,
-                            isPlaying: isPlaying,
+                            previewSize: previewSize, canvasSize: canvasSize, canvasPixelSize: canvasPixels,
+                            clips: clips, playheadSeconds: playheadSeconds, isPlaying: isPlaying,
                             onCanvasPixelSizeChanged: { liveCanvasPixelSize = $0 },
                             onCanvasPixelSizeCommitted: { pixels in
                                 liveCanvasPixelSize = nil
-                                store.setExportCanvasSize(
-                                    width: Int(pixels.width.rounded()),
-                                    height: Int(pixels.height.rounded())
-                                )
+                                store.setExportCanvasSize(width: Int(pixels.width.rounded()), height: Int(pixels.height.rounded()))
                             }
                         )
                         .frame(width: previewSize.width, height: previewSize.height)
@@ -829,7 +833,7 @@ private struct PlaybackPreviewPane: View {
                             Text("No video at playhead")
                                 .font(.caption)
                             if geometry.size.height >= 140 {
-                                Text("The top visible timeline lane plays here.")
+                                Text("Visible lanes are layered here, with the top lane in front.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -873,60 +877,52 @@ private struct PlaybackCanvasView: View {
     let previewSize: CGSize
     let canvasSize: CGSize
     let canvasPixelSize: CGSize
-    let clip: VideoClip
-    let url: URL
-    let playbackSyncOffsetSeconds: Double
+    let clips: [VideoClip]
     let playheadSeconds: Double
     let isPlaying: Bool
     let onCanvasPixelSizeChanged: (CGSize) -> Void
     let onCanvasPixelSizeCommitted: (CGSize) -> Void
-    @State private var framingEditSecond: Double?
+    @State private var framingEdit: (id: String, seconds: Double)?
 
+    private var target: VideoClip? {
+        if let edit = framingEdit, let clip = clips.first(where: { $0.id == edit.id }) { return clip }
+        return clips.first(where: { $0.id == store.selectedClipId }) ?? clips.first
+    }
+    private func framing(_ clip: VideoClip) -> ClipFraming {
+        let current = store.clip(id: clip.id).map { store.project.presentedClip($0) } ?? clip
+        return current.automatedFraming(atLocalSecond: framingEdit?.id == clip.id
+            ? framingEdit!.seconds : playheadSeconds - current.timelineStartSeconds)
+    }
     var body: some View {
         ZStack {
-            PlaybackPlayerView(
-                url: url,
-                clipStartSeconds: clip.timelineStartSeconds,
-                trimInSeconds: clip.trimInSeconds,
-                playbackSyncOffsetSeconds: playbackSyncOffsetSeconds,
-                playheadSeconds: playheadSeconds,
-                isPlaying: isPlaying,
-                framing: displayedFraming
-            )
-            .frame(width: canvasSize.width, height: canvasSize.height)
-            .clipped()
-            .allowsHitTesting(false)
-            CanvasCropOverlay(
-                framing: displayedFraming,
-                panReferenceSize: canvasSize,
-                canvasPixelSize: canvasPixelSize,
-                onFramingBegan: {
-                    framingEditSecond = playheadSeconds - clip.timelineStartSeconds
-                    store.beginClipFramingEdit(clip.id)
-                    store.selectedClipId = clip.id
-                    store.selectedMediaAssetId = clip.mediaAssetId
-                },
-                onFramingChanged: { framing in
-                    store.updateClipFraming(clip.id, zoom: framing.zoom, offsetX: framing.offsetX,
-                        offsetY: framing.offsetY, rotationDegrees: framing.rotationDegrees,
-                        referenceLocalSeconds: framingEditSecond ?? playheadSeconds - clip.timelineStartSeconds,
-                        trackUndo: false, origin: .canvas)
-                },
-                onFramingCommitted: {
-                    store.saveProject()
-                    framingEditSecond = nil
-                },
-                onCanvasPixelSizeChanged: onCanvasPixelSizeChanged,
-                onCanvasPixelSizeCommitted: onCanvasPixelSizeCommitted
-            )
-            .id(clip.id)
-            .frame(width: canvasSize.width, height: canvasSize.height)
+            ZStack {
+                ForEach(Array(clips.reversed())) { clip in
+                    if let asset = store.mediaAsset(for: clip), let url = store.absoluteURL(for: asset) {
+                        PlaybackPlayerView(url: url, clipStartSeconds: clip.timelineStartSeconds,
+                            trimInSeconds: clip.trimInSeconds, playbackSyncOffsetSeconds: store.effectivePlaybackSyncOffsetSeconds(for: clip),
+                            playheadSeconds: playheadSeconds, isPlaying: isPlaying, framing: framing(clip))
+                            .allowsHitTesting(false)
+                    }
+                }
+            }.frame(width: canvasSize.width, height: canvasSize.height).clipped()
+            if let clip = target {
+                CanvasCropOverlay(framing: framing(clip), panReferenceSize: canvasSize, canvasPixelSize: canvasPixelSize,
+                    onFramingBegan: {
+                        framingEdit = (clip.id, playheadSeconds - clip.timelineStartSeconds)
+                        store.beginClipFramingEdit(clip.id)
+                        store.selectedClipId = clip.id; store.selectedMediaAssetId = clip.mediaAssetId
+                    },
+                    onFramingChanged: { value in
+                        store.updateClipFraming(clip.id, zoom: value.zoom, offsetX: value.offsetX,
+                            offsetY: value.offsetY, rotationDegrees: value.rotationDegrees,
+                            referenceLocalSeconds: framingEdit?.seconds ?? playheadSeconds - clip.timelineStartSeconds,
+                            trackUndo: false, origin: .canvas)
+                    },
+                    onFramingCommitted: { store.endClipFramingEdit(); framingEdit = nil },
+                    onCanvasPixelSizeChanged: onCanvasPixelSizeChanged, onCanvasPixelSizeCommitted: onCanvasPixelSizeCommitted)
+                    .id(clip.id).frame(width: canvasSize.width, height: canvasSize.height)
+            }
         }
-    }
-
-    private var displayedFraming: ClipFraming {
-        let current = store.clip(id: clip.id).map { store.project.presentedClip($0) } ?? clip
-        return current.automatedFraming(atLocalSecond: framingEditSecond ?? playheadSeconds - current.timelineStartSeconds)
     }
 }
 
@@ -1293,7 +1289,7 @@ private struct InspectorPane: View {
                         LabeledContent("Automation", value: "\(clip.automationMarkers.count) markers")
                         Slider(
                             value: Binding(
-                                get: { store.clip(id: clip.id)?.framing?.zoom ?? 1 },
+                                get: { store.framingForEditing(store.clip(id: clip.id) ?? clip).zoom },
                                 set: {
                                     store.updateClipFraming(clip.id,
                                         zoom: $0,
@@ -1308,10 +1304,10 @@ private struct InspectorPane: View {
                         ) {
                             Text("Zoom")
                         }
-                        LabeledContent("Zoom", value: String(format: "%.2fx", clip.framing?.zoom ?? 1))
+                        LabeledContent("Zoom", value: String(format: "%.2fx", store.framingForEditing(clip).zoom))
                         Slider(
                             value: Binding(
-                                get: { store.clip(id: clip.id)?.framing?.offsetX ?? 0 },
+                                get: { store.framingForEditing(store.clip(id: clip.id) ?? clip).offsetX },
                                 set: {
                                     store.updateClipFraming(clip.id,
                                         offsetX: $0,
@@ -1328,7 +1324,7 @@ private struct InspectorPane: View {
                         }
                         Slider(
                             value: Binding(
-                                get: { store.clip(id: clip.id)?.framing?.offsetY ?? 0 },
+                                get: { store.framingForEditing(store.clip(id: clip.id) ?? clip).offsetY },
                                 set: {
                                     store.updateClipFraming(clip.id,
                                         offsetY: $0,
@@ -1345,7 +1341,7 @@ private struct InspectorPane: View {
                         }
                         Slider(
                             value: Binding(
-                                get: { store.clip(id: clip.id)?.framing?.rotationDegrees ?? 0 },
+                                get: { store.framingForEditing(store.clip(id: clip.id) ?? clip).rotationDegrees },
                                 set: {
                                     store.updateClipFraming(clip.id,
                                         rotationDegrees: $0,
@@ -1377,7 +1373,7 @@ private struct InspectorPane: View {
                                 setSelectedClipRotation(0)
                             }
                         }
-                        LabeledContent("Rotate", value: String(format: "%.1f deg", clip.framing?.rotationDegrees ?? 0))
+                        LabeledContent("Rotate", value: String(format: "%.1f deg", store.framingForEditing(clip).rotationDegrees))
                         if !clip.automationMarkers.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("Automation Markers")
@@ -1387,7 +1383,7 @@ private struct InspectorPane: View {
                                     HStack {
                                         Image(systemName: "flag.fill")
                                             .foregroundStyle(.yellow)
-                                        Text(formatTimelineSeconds(clip.timelineStartSeconds + marker.timeSeconds, frameRate: clip.frameRate, format: store.clockDisplayFormat))
+                                        Text(formatTimelineSeconds(store.project.presentedClip(clip).timelineStartSeconds + marker.timeSeconds, frameRate: clip.frameRate, format: store.clockDisplayFormat))
                                             .font(.caption.monospacedDigit())
                                         Spacer()
                                         Button {
@@ -1593,7 +1589,7 @@ private struct InspectorPane: View {
     }
 
     private func rotateSelectedClip(by degrees: Double) {
-        let current = selectedClip?.framing?.rotationDegrees ?? 0
+        let current = selectedClip.map { store.framingForEditing($0).rotationDegrees } ?? 0
         let snapped = (current / 5).rounded() * 5
         setSelectedClipRotation(snapped + degrees)
     }
@@ -1604,7 +1600,7 @@ private struct InspectorPane: View {
     }
 
     private func normalizeAndCommitSelectedClipRotation() {
-        let current = selectedClip?.framing?.rotationDegrees ?? 0
+        let current = selectedClip.map { store.framingForEditing($0).rotationDegrees } ?? 0
         store.updateSelectedClipFraming(
             rotationDegrees: normalizeRotation(current),
             trackUndo: false,
@@ -1634,7 +1630,7 @@ private struct InspectorPane: View {
             return
         }
         isInspectorFramingEditActive = false
-        store.saveProject()
+        store.endClipFramingEdit()
     }
 
     private func applyEstimatedLatency() {
@@ -1780,7 +1776,7 @@ private struct TimelineView: View {
                     store.addLane()
                 }
                 .padding(.trailing, 6)
-                Slider(value: $timelineZoom, in: 4...48) {
+                Slider(value: $timelineZoom, in: 4...240) {
                     Text("Zoom")
                 }
                 .frame(width: compact ? 100 : 180)
@@ -1848,8 +1844,9 @@ private struct TimelineView: View {
                 .padding(.vertical, 12)
                 .background(Color.white.opacity(0.025))
 
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal) {
+                TimelineScrollView(width: timelineWidth, height: timelineContentHeight + 24, scale: secondsToPixels,
+                    seconds: { activePlayheadSeconds }, playing: { editPlayback.playing(sync: syncEngine) },
+                    zoom: { timelineZoom = $0 }, extend: { followedSeconds = max(followedSeconds, $0) }) {
                         ZStack(alignment: .topLeading) {
                             Color.clear
                                 .frame(width: timelineWidth, height: timelineContentHeight)
@@ -1873,6 +1870,10 @@ private struct TimelineView: View {
                                                 videoURL: videoURL(for: clip),
                                                 secondsToPixels: secondsToPixels,
                                                 isSelected: store.selectedClipId == clip.id,
+                                                onMarker: { seconds in
+                                                    store.selectedClipId = clip.id; store.selectedMediaAssetId = clip.mediaAssetId
+                                                    seekTimelineIfEditing(locationX: CGFloat(seconds * secondsToPixels))
+                                                },
                                                 onMove: { startSeconds in
                                                     store.updateClipStart(clip.id, startSeconds: startSeconds)
                                                 },
@@ -1948,17 +1949,13 @@ private struct TimelineView: View {
                             }
                             .padding(.vertical, 12)
 
-                            TimelineCursor(sync: syncEngine, edit: editPlayback, scale: secondsToPixels, height: timelineContentHeight) { second in
-                                followedSeconds = max(followedSeconds, Double(second))
-                                if let target = nearestLabelSecond(to: Double(second)) { proxy.scrollTo(target, anchor: .center) }
-                            }
+                            TimelineCursor(sync: syncEngine, edit: editPlayback, scale: secondsToPixels, height: timelineContentHeight)
 
-                        }
-                    }
-                    .frame(height: timelineContentHeight + 24)
-                    .background(Color.black.opacity(0.28))
-
+                        }.frame(width: timelineWidth, height: timelineContentHeight + 24, alignment: .topLeading)
                 }
+                .frame(height: timelineContentHeight + 24)
+                .background(Color.black.opacity(0.28))
+                .help("Pinch to zoom. Playback follows the playhead; scroll to look elsewhere temporarily.")
             }
             }
         }
@@ -1973,7 +1970,7 @@ private struct TimelineView: View {
     }
 
     private var activePlayheadSeconds: Double {
-        editPlayback.isEditMode ? editPlayback.playheadSeconds : syncEngine.displaySeconds
+        editPlayback.seconds(sync: syncEngine)
     }
 
     private func videoURL(for clip: VideoClip) -> URL? {
@@ -1996,9 +1993,9 @@ private struct TimelineView: View {
     }
 
     private func seekTimelineIfEditing(locationX: CGFloat) {
-        guard editPlayback.isEditMode else { return }
         let seconds = max(0, Double(locationX) / max(1, secondsToPixels))
-        editPlayback.seek(to: seconds, audioOffsetSeconds: store.project.audio.audioOffsetSeconds)
+        if syncEngine.isHosted { syncEngine.preview(at: seconds) }
+        else { editPlayback.isEditMode = true; editPlayback.seek(to: seconds, audioOffsetSeconds: store.project.audio.audioOffsetSeconds) }
     }
 
     private var seekGesture: some Gesture {
@@ -2064,12 +2061,6 @@ private struct TimelineView: View {
 
     private var labelWidth: CGFloat {
         max(90, CGFloat(labelStepSeconds) * secondsToPixels)
-    }
-
-    private func nearestLabelSecond(to seconds: Double) -> Double? {
-        labelSeconds.min { lhs, rhs in
-            abs(lhs - seconds) < abs(rhs - seconds)
-        }
     }
 
     private func isMajorGridLine(_ seconds: Double) -> Bool {
@@ -2194,7 +2185,8 @@ private final class PlaybackPlayerNSView: NSView {
     private func configureLayers() {
         wantsLayer = true
         layer = CALayer()
-        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.backgroundColor = NSColor.clear.cgColor
+        playerLayer.backgroundColor = NSColor.clear.cgColor
         playerLayer.player = playback.player
         playerLayer.videoGravity = .resizeAspect
         playerLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -2251,9 +2243,7 @@ private struct LaneHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            TextField("Lane Name", text: laneName)
-                .font(.caption.bold())
-                .textFieldStyle(.plain)
+            LaneNameEditor(name: lane.name) { store.renameLane(lane.id, name: $0) }.frame(height: 17)
             if let inputs = store.captureInputs {
                 LaneSourcePicker(inputs: inputs, discovery: inputs.discovery, lane: lane)
             }
@@ -2370,6 +2360,7 @@ private struct ClipBlock: View {
     let videoURL: URL?
     let secondsToPixels: Double
     let isSelected: Bool
+    let onMarker: (Double) -> Void
     let onMove: (Double) -> Void
     let onResizeStart: (Double) -> Void
     let onResizeEnd: (Double) -> Void
@@ -2468,7 +2459,9 @@ private struct ClipBlock: View {
             ForEach(visibleAutomationMarkers) { marker in
                 automationMarkerView
                     .offset(x: markerX(for: marker, width: width) - width / 2)
-                    .allowsHitTesting(false)
+                    .contentShape(Rectangle())
+                    .onTapGesture { onMarker(clip.timelineStartSeconds + marker.timeSeconds) }
+                    .help("Preview and edit this automation marker")
             }
         }
         .frame(width: width, height: 40)
@@ -2812,7 +2805,7 @@ private struct TimelineClock: View {
     @ObservedObject var sync: LogicSyncEngine
     @ObservedObject var edit: EditPlaybackController
     var body: some View {
-        Text(formatTimelineSeconds(edit.isEditMode ? edit.playheadSeconds : sync.displaySeconds, frameRate: .fps30, format: .logicTime))
+        Text(formatTimelineSeconds(edit.seconds(sync: sync), frameRate: .fps30, format: .logicTime))
             .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
     }
 }
@@ -2822,13 +2815,11 @@ private struct TimelineCursor: View {
     @ObservedObject var edit: EditPlaybackController
     let scale: Double
     let height: CGFloat
-    let follow: (Int) -> Void
-    private var seconds: Double { edit.isEditMode ? edit.playheadSeconds : sync.displaySeconds }
+    private var seconds: Double { edit.seconds(sync: sync) }
     var body: some View {
         Rectangle().fill(Color(red: 0.42, green: 0.89, blue: 0.78))
             .frame(width: 1.5, height: height).offset(x: seconds * scale, y: 12)
             .allowsHitTesting(false)
-            .onChange(of: Int(seconds / 5)) { step in follow(max(0, step * 5)) }
     }
 }
 

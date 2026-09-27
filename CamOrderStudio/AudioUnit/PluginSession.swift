@@ -83,6 +83,7 @@ final class PluginSession: NSObject {
         store.isHosted = true
         store.requiresLaneSource = true
         store.captureInputs = inputs
+        store.framingPlayheadSeconds = { [weak sync] in sync?.editorSeconds ?? 0 }
         restore()
         store.onDocumentChange = { [weak self] in self?.saveLink() }
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
@@ -180,7 +181,7 @@ final class PluginSession: NSObject {
         let update = transportMonitor.update(seconds: reportedSeconds, reportedPlaying: reportedPlaying,
             valid: available, reportTime: usingTimecode ? now : snapshot.lastRenderSeconds, now: now)
         let clockOffset = now - snapshot.hostSeconds
-        let canAlign = !usingTimecode && update.playing && snapshot.playing != 0 && !update.timingDelayed && snapshot.valid != 0
+        let canAlign = abs(update.seconds - snapshot.seconds) < 0.01 && !usingTimecode && update.playing && snapshot.playing != 0 && !update.timingDelayed && snapshot.valid != 0
             && abs(clockOffset) < 2 && now - snapshot.lastRenderSeconds < 0.1
         let seconds = canAlign ? max(0, snapshot.seconds + clockOffset) : update.seconds
         lastDiagnostic = ["transportSource": usingTimecode ? "Logic Link" : "Audio Unit", "renderCount": snapshot.renderCount,
@@ -197,6 +198,7 @@ final class PluginSession: NSObject {
             logEvent(update.timingDelayed ? "host_timing_delayed_capture_continues" : "host_timing_resumed", seconds: seconds)
             timingWasDelayed = update.timingDelayed
         }
+        if update.event == .stopped { store.unarmAllLanes() }
         var startedTake = false
         for state in recorders.values {
             let capture = state.capture
@@ -206,7 +208,7 @@ final class PluginSession: NSObject {
                 if state.members.contains(where: { store.pendingTakes[$0] != nil }) {
                     if update.event == .stopped {
                         let end = abs(seconds - state.lastRollingSeconds) > 0.25 ? state.lastRollingSeconds : seconds
-                        stop(state, at: end, keepArmed: true)
+                        stop(state, at: end)
                     } else if update.event == .relocated {
                         stop(state, at: state.lastRollingSeconds)
                         store.lastError = "Takes saved before Logic moved backward. Arm the lanes again for the next take."
@@ -221,7 +223,7 @@ final class PluginSession: NSObject {
                         }
                     }
                 }
-                if reportedPlaying, seconds >= state.lastRollingSeconds - 0.25 { state.lastRollingSeconds = seconds }
+                if update.playing && reportedPlaying, seconds >= state.lastRollingSeconds - 0.25 { state.lastRollingSeconds = seconds }
             }
             for id in Array(state.members) where store.pendingTakes[id] == nil && !armed.contains(where: { $0.id == id }) {
                 store.discardArmedBuffer(laneID: id); state.members.remove(id)
@@ -273,12 +275,12 @@ final class PluginSession: NSObject {
         }
         lastSeconds = seconds
     }
-    private func stop(_ state: SourceRecorder, at seconds: Double, keepArmed: Bool = false) {
+    private func stop(_ state: SourceRecorder, at seconds: Double) {
         guard state.stopSeconds == nil else { return }
         state.stopSeconds = seconds
         for id in state.members {
             if store.pendingTakes[id] != nil, state.ends[id] == nil { state.ends[id] = seconds; store.captureEndSeconds[id] = seconds }
-            if !keepArmed { store.disarmLane(id) }
+            store.disarmLane(id)
         }
         state.capture.stopRecording()
         logEvent("input_stop", seconds: seconds, source: state.id)
@@ -373,6 +375,14 @@ private final class ResizableEditorView<Content: View>: NSHostingView<Content> {
         window.styleMask.insert(.resizable)
         window.contentMinSize = CGSize(width: 720 + chromeWidth, height: 360 + chromeHeight)
         window.contentMaxSize = CGSize(width: 4096, height: 2160)
+    }
+}
+
+@_cdecl("CamOrderEnsureSession")
+func ensureCamOrderSession(_ pointer: OpaquePointer) {
+    MainActor.assumeIsolated {
+        guard COBridgeIsAlive(pointer), COGetSession(pointer) == nil else { return }
+        COSetSession(pointer, PluginSession(bridge: pointer))
     }
 }
 

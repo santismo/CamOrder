@@ -21,8 +21,7 @@ final class ExportRangeSelection: ObservableObject {
     init(project: CamOrderProject, selectedClip: VideoClip?, playhead: Double) {
         timeline = RenderExportEngine.editedRange(in: project)
         selected = selectedClip.flatMap { clip in
-            let presented = project.presentedClip(clip)
-            return MovieExportRange(startSeconds: presented.timelineStartSeconds, endSeconds: presented.timelineStartSeconds + presented.durationSeconds)
+            return MovieExportRange(startSeconds: clip.timelineStartSeconds, endSeconds: clip.timelineStartSeconds + clip.durationSeconds)
         }
         self.playhead = playhead
         startText = String(format: "%.6f", timeline?.startSeconds ?? 0)
@@ -59,7 +58,7 @@ struct ExportRangeAccessory: View {
                 Text(String(format: "%.6f → %.6f s  ·  %.3f s movie", range.startSeconds, range.endSeconds, range.durationSeconds))
                     .font(.caption.monospacedDigit())
             }
-            Text("Uses the edited regions and video sync offsets. All visible lanes are composited as shown on Main Stage.")
+            Text("Sync offsets shift video inside this fixed export range. Place each export at the same start in Logic. Visible lanes are layered as on Main Stage.")
                 .font(.caption).foregroundStyle(.secondary)
             if selection.range == nil { Text("Choose an end time after the start.").font(.caption).foregroundStyle(.red) }
         }.padding(12).frame(width: 430).preferredColorScheme(.dark)

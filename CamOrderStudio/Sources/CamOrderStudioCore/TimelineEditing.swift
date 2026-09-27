@@ -63,6 +63,17 @@ extension VideoClip {
         automationMarkers.sort { $0.timeSeconds < $1.timeSeconds }
     }
 
+    public mutating func setAutomationFraming(_ value: ClipFraming, atLocalSecond seconds: Double) {
+        let time = min(durationSeconds, max(0, seconds))
+        let tolerance = 0.5 / max(1, frameRate.framesPerSecond)
+        if let index = automationMarkers.firstIndex(where: { abs($0.timeSeconds - time) <= tolerance }) {
+            automationMarkers[index].framing = value
+        } else {
+            automationMarkers.append(ClipAutomationMarker(timeSeconds: time, framing: value))
+        }
+        automationMarkers.sort { $0.timeSeconds < $1.timeSeconds }
+    }
+
     public mutating func reframe(from reference: ClipFraming, to target: ClipFraming) {
         func adjusted(_ value: ClipFraming) -> ClipFraming {
             ClipFraming(zoom: value.zoom * target.zoom / max(0.001, reference.zoom),
@@ -98,15 +109,19 @@ extension CamOrderProject {
         return result
     }
 
-    public func playbackClip(at seconds: Double) -> VideoClip? {
-        for lane in timeline.lanes where !lane.isMuted {
+    /// One active region per visible lane, ordered front to back.
+    public func playbackClips(at seconds: Double) -> [VideoClip] {
+        guard seconds.isFinite else { return [] }
+        return timeline.lanes.filter { !$0.isMuted }.compactMap { lane in
             let local = seconds - videoOffsetSeconds(forLane: lane.id)
-            if let clip = lane.clips.last(where: { $0.isEnabled && local >= $0.timelineStartSeconds && local < $0.timelineStartSeconds + $0.durationSeconds }) {
-                return presentedClip(clip, laneID: lane.id)
-            }
+            return lane.clips.last(where: {
+                $0.isEnabled && local >= $0.timelineStartSeconds && local < $0.timelineStartSeconds + $0.durationSeconds
+            }).map { presentedClip($0, laneID: lane.id) }
         }
-        return nil
     }
+
+    public func playbackClip(at seconds: Double) -> VideoClip? { playbackClips(at: seconds).first }
+
 }
 
 public struct MovieExportRange: Equatable, Sendable {

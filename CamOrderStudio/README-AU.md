@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.4.0 development build
+# CamOrder Studio Audio Unit — 0.5.0 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -9,7 +9,7 @@ CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **o
 3. Open the project menu beside **CamOrder**, choose **New Project…**, and save a `.camorderstudio` folder alongside your Logic project. Keep that whole folder when moving or sharing the project; it contains the media.
 4. Choose the shared **Default** source under **Live Inputs**. Every lane initially uses that input, and its preview starts automatically. Use the input menu on an individual lane to assign a different camera or screen source. Allow camera or screen access for the included **CamOrder Capture** helper when macOS asks. Permissions can be changed in System Settings → Privacy & Security.
 5. Wait for the live image(s), **Arm** one or more CamOrder lanes, and press **Play or Record in Logic**. For audio recording, also arm the relevant Logic audio track. You can work in Logic’s timeline or close the plug-in editor; the video session stays active.
-6. Stop Logic to finalize the take. The armed CamOrder lanes stay armed for the next Play/Record. **Disarm** cancels pre-roll; **Stop Take** finalizes and disarms.
+6. Stop Logic to finalize the take. CamOrder automatically disarms the lanes when Stop is confirmed. Arm the desired lanes again for the next take. **Disarm** cancels pre-roll; **Stop Take** finalizes and disarms.
 
 Arming buffers video before transport starts so the beginning of the take can be retained. Different assigned inputs record simultaneously. Lanes sharing one camera use one capture connection and movie file, with a separate timeline region for each armed lane. Missing transport callbacks do not cut off capture or let the CamOrder playhead run indefinitely: the displayed clock holds its last confirmed position. If Logic stops without sending a stop report, use **Stop Take**. A backward transport move or manual Stop Take disarms the lane. Automatic repeated cycle takes are not supported.
 
@@ -19,7 +19,7 @@ New projects start with three lanes; **+** adds more. Each lane starts at **Defa
 
 Choose another source in a lane’s input menu to give it its own camera. The Live Inputs panel shows **one preview per distinct source**, labeled with the lanes using it. Assign the same source to several lanes to share its preview and connection. Choose **No input** for a lane used only for imported footage. Source assignments save with the project.
 
-Arm any combination of lanes. Their different cameras follow the same Logic Play/Record/Stop clock and keep recording with the editor closed. A camera failure finalizes and disarms its affected lanes; the other cameras continue. Each lane keeps its own video-sync adjustment. Main Stage and export still use the top visible region, rather than combining camera images into a mosaic.
+Arm any combination of lanes. Their different cameras follow the same Logic Play/Record/Stop clock and keep recording with the editor closed. A camera failure finalizes and disarms its affected lanes; the other cameras continue. Each lane keeps its own video-sync adjustment. Main Stage and export combine the visible lanes. The top lane is in front; make its video smaller or move it aside to reveal videos on lower lanes.
 
 A lane armed during playback starts at the current position. Disarming one shared-camera lane fixes that region’s end while the other lanes keep recording. Its region shows **finishing** until the shared movie is finalized; stop the other lanes sharing that input before rearming that particular lane. Camera selection and capture-region changes are locked while affected lanes are armed or finishing.
 
@@ -27,7 +27,7 @@ Use a preview tile’s **…** menu to restart/stop its preview or show/apply/hi
 
 There is no fixed three-input cap. Four simultaneous synthetic inputs and four independent helper processes were verified. The number of physical cameras and sustainable frame rate depend on macOS, camera availability, USB bandwidth and encoding load; this build has not been tested with four physical cameras on this Mac.
 
-The red transport button and **R** in the plug-in forward Logic’s R key command. **Space** and Play control Logic in **Logic** mode. In **Edit** mode, playback and scrubbing are local, with optional imported master audio. Arming a lane returns to Logic mode. Text entry is unaffected by transport shortcuts. Removing the plug-in ends its session.
+The plug-in has one transport: the red button and **R** forward Logic’s R key command, and **Space** and Play control Logic. There is no Logic/Edit switch. When stopped, click the CamOrder timeline or a marker to preview that frame; starting Logic or receiving a changed host position resumes following Logic. Closing and reopening the editor also returns to the host clock. Restoring a saved AU project reconnects the video session before the editor opens. Text entry is unaffected by transport shortcuts. Removing the plug-in ends its session.
 
 ## A simpler, adjustable workspace
 
@@ -36,10 +36,17 @@ The red transport button and **R** in the plug-in forward Logic’s R key comman
 - Drag the divider between **Main Stage and Live Inputs** to change their widths. Drag the horizontal divider above the timeline to change monitor/timeline heights. **View** can hide Live Inputs or the timeline and reset panel sizes.
 - Main Stage remains available in compact layouts. Each lane’s input selector stays with its name and Arm controls. Lane headers and their Arm buttons scroll together with the timeline.
 - The four small exterior canvas corners adjust width and height independently. Drag inside the video to position it; use pinch or Inspector zoom for framing. Inspector also provides rotation and canvas dimensions.
-- Main Stage and export use the **top unmuted lane with an enabled region at the playhead**. Selecting a different region does not change compositing priority. Within one lane, the last overlapping region wins. Gaps remain blank.
+- Main Stage and export layer **one enabled region from each unmuted lane**, with the top lane in front. Selecting a region chooses what to edit without changing layer order. Smaller or moved foreground videos reveal lower videos; within one lane, the last overlapping region wins. Gaps with no visible video remain black.
+- Press Return or click outside a lane name to commit it and release keyboard focus; Escape cancels the current rename.
+- Delete and Undo/Redo work while a lane is armed or recording. Undo preserves current arming and capture connections, so it does not silently rearm a finished lane.
+- During Play/Record, the timeline keeps the playhead near the center, clamped at the left edge near project start. Scrolling gives you two seconds to look elsewhere before following resumes. Pinch the trackpad over the timeline to zoom around the pointer.
 - Splits and trims retain the correct source frames and framing animation. Original source movies are never rewritten.
 
 Window behavior and screenshots were checked in an owned native AU host. Logic adds its own surrounding window controls and may impose additional sizing behavior.
+
+## Animate video framing
+
+Select a region, stop at the first desired position, set its framing, and press **M** or **Marker** above the timeline. Move the playhead to another position, add another marker, then change zoom, position or rotation. Once a clip has markers, framing edits update or add the pose at the current playhead; they no longer move every marker together. Each drag is one Undo step. Click a flag in the timeline to preview and edit that point while stopped. Animation plays in Main Stage and export, including after splits and trims.
 
 ## Video sync offsets
 
@@ -48,7 +55,8 @@ Open **Sync** for the whole-project offset and each lane’s offset. The sliders
 - **Negative** moves video earlier; **positive** moves it later.
 - Project and lane values **add together**. For example, project −40 ms plus lane +10 ms produces −30 ms for that lane.
 - Enter a value and press Return or **Apply**, use the 1 ms stepper, or choose **Reset**.
-- The displayed regions, Main Stage playback and exported movie use the adjusted positions. Source recordings and underlying edit points stay unchanged. Adjustments save with the CamOrder project and support Undo.
+- The displayed regions, Main Stage playback and exported movie use the adjusted positions. You can change offsets after recording: existing takes update immediately, and the next export includes the correction. Source recordings and underlying edit points stay unchanged. Adjustments save with the CamOrder project and support Undo.
+- **Edited timeline** export stays anchored to the edited start/end before sync adjustments. For example, changing the project offset to −82 ms advances picture within the exported movie; import it at the same noted start in Logic. Different lanes use their own combined lane + project offsets. Negative shifts can trim picture at the beginning and leave black at the end; positive shifts can leave leading black and clip the end. Use **Custom range** to include extra time when needed.
 - The panel shows a 1/64-note equivalent at the project tempo. At 88 BPM it is about **42.61 ms**. No correction is applied automatically.
 
 The controls allow ±5000 ms each. Video shifted before project zero is clipped at zero. Imported master audio stays on its own project clock; camera audio, if explicitly included in export, travels with its video. Existing projects retain any previously saved legacy clip timing adjustments in addition to these new controls.
@@ -65,13 +73,13 @@ Captured takes are video-only: they do not record the microphone or Logic’s mi
 ## Export the edited movie
 
 1. Click **Export**. The save panel now includes an explicit **Range** choice:
-   - **Edited timeline**: the first visible edited region through the final visible region, including all lane/project offsets.
-   - **Selected region range**: the selected region’s current edited start and end, while retaining the same visible lane priority as Main Stage.
+   - **Edited timeline**: the first enabled, unmuted edited region through the final edited end, before lane/project sync offsets. Offsets move picture inside this fixed window.
+   - **Selected region range**: the selected region’s current edited start and end, before sync offsets, with the same layered composition as Main Stage.
    - **From playhead**: the current playhead through the final visible region.
    - **From project start**: include time from zero.
    - **Custom range**: enter exact start/end seconds.
-2. Check the displayed start, end and movie duration. MOV and MP4 exports read the current source trim; removed footage is not restored at the front. Exported master audio is restricted to the chosen range.
-3. The movie is accompanied by a `.logic-placement.txt` note containing its **edited timeline start**. Use the project menu’s **Show last export** to reveal it.
+2. Check the displayed start, end and movie duration. The range stays fixed when only sync offsets change. MOV and MP4 exports read the current source trim; removed footage is not restored at the front. Exported master audio is restricted to the chosen range.
+3. The movie is accompanied by a `.logic-placement.txt` note containing its **fixed export start**, unaffected by changes to sync offsets for the same edited range. Use the project menu’s **Show last export** to reveal it.
 4. In Logic, open the movie through **File → Movie → Open Movie**. Place Logic’s playhead at the start given in the note and use **Move Movie Region to Playhead**, or set Movie Start in Project Settings → Movie. For an absolute SMPTE position, add the Logic project’s SMPTE origin to the note’s seconds.
 
 Movie import and placement are manual; this Audio Unit does not change Logic’s movie track. Export defaults to a silent movie for use with Logic’s existing audio. Existing exports survive a failed render, and source-media destinations are rejected.
@@ -92,16 +100,15 @@ The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 secon
 
 ## Verification
 
-- 33 Swift tests: real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, and transport gaps.
+- 39 Swift tests: independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
 - Installed-component validation with Apple’s `auval` for `aufx / CmSt / Sntm`.
 - Bit-exact mono/stereo pass-through at 44.1, 48 and 96 kHz, including silent input and 1/64/512-frame blocks; independent Audio Unit instance state.
 - Native editor creation, close/reopen and screenshots at 1280 × 820, 820 × 520, 1120 × 460, 760 × 440, arbitrary 803 × 417, and minimum 720 × 360; the four-input overview is also captured at 1280 × 960.
-- Production recording session with no editor: Play/Record, host following, Stop, repeated takes, missing callbacks and manual finalization, using real encoded synthetic-camera movies.
+- Production recording session with no editor: Play/Record, host following, Stop, repeated takes, missing callbacks and manual finalization, using real encoded synthetic-camera movies, plus automatic disarming and AU restoration before editor creation.
 - Multi-input session regression: three lanes sharing one camera/file, three different cameras with one disconnecting mid-take, independent late arm/stop on a shared camera, four simultaneous encoded movies, and assignment save/reopen.
 - Four capture helpers running together with isolated command channels and clean shutdown, without activating physical cameras.
-- Isolated CoreMIDI fallback transport with no AU processing, R/Space forwarding, actual SwiftUI canvas and window-grip drags, and saved edit/offset/undo regressions.
+- Isolated CoreMIDI fallback transport with no AU processing, R/Space forwarding, actual SwiftUI canvas and window-grip drags, native lane-name Return/click-away focus, distant timeline scrolling/pinch anchoring, and saved edit/offset/armed-undo/marker regressions.
 - Capture-helper launch, input discovery and clean shutdown without activating a physical camera.
-- Read-only playback of the saved edited regions in the existing test project.
 
 A verification summary and screenshots are included in the release. The actual Logic session and physical camera combination still need a user check after restart. The download is a locally signed development build for **Intel Macs, macOS 13 or newer**, not a notarized or universal distribution release.
 

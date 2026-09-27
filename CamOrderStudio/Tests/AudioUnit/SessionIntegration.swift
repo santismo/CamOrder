@@ -108,8 +108,8 @@ struct SessionIntegration {
         }
         for pass in 0..<2 {
             let start = 12.0 + Double(pass) * 10
-            if pass == 0 { session.store.armLane(session.store.project.timeline.lanes[0].id) }
-            require(session.store.hasArmedLane, "Video lane remains armed between takes")
+            session.store.armLane(session.store.project.timeline.lanes[0].id)
+            require(session.store.hasArmedLane, "Video lane arms for the next take")
             pump(duration: 0.3, position: start, playing: false)
             require(capture.isRecording && session.store.armedBuffer != nil, "Arming starts pre-roll without any editor")
             // No NSHostingView or plugin window is created in this test.
@@ -117,7 +117,7 @@ struct SessionIntegration {
             require(session.store.pendingTake != nil && capture.isRecording, "Take starts and remains active with no editor")
             require(abs(session.sync.displaySeconds - (start + 2.4)) < 0.12, "Playhead follows host with no editor")
             pump(duration: 0.7, position: start + 2.4, playing: false)
-            require(session.store.pendingTake == nil && session.store.hasArmedLane, "Host Stop saves the take and keeps the lane armed")
+            require(session.store.pendingTake == nil && !session.store.hasArmedLane, "Host Stop saves the take and automatically disarms the lane")
             let clips = session.store.project.timeline.lanes[0].clips
             require(clips.count == pass + 1, "Each take saved as a clip")
             let clip = clips.last!
@@ -127,6 +127,7 @@ struct SessionIntegration {
             require(asset.duration.seconds > 2.4 && !asset.tracks(withMediaType: .video).isEmpty, "Recorded movie is playable")
             print("PASS: \(pass == 0 ? "Play" : "Record") saves a \(clip.durationSeconds)-second movie at \(clip.timelineStartSeconds) with no plugin editor; playhead follows host")
         }
+        session.store.armLane(session.store.project.timeline.lanes[0].id)
         pump(duration: 0.3, position: 32, playing: false)
         pump(duration: 1.2, position: 32, playing: true)
         let lastPosition = session.sync.displaySeconds
@@ -172,10 +173,11 @@ struct SessionIntegration {
             }
         }
         var before = COTransport(); _ = COReadTransport(bridge, &before)
-        session.store.armLane(session.store.project.timeline.lanes[0].id)
         locate(44)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         require(abs(session.sync.displaySeconds - 44) < 0.01 && session.store.pendingTake == nil, "MTC locate follows host without starting a recording")
+        session.store.armLane(session.store.project.timeline.lanes[0].id)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         send([0xF0,0x7F,0x7F,6,2,0xF7]); send([0xF0,0x7F,0x7F,6,6,0xF7])
         runTimecode(start: 44, duration: 2.4)
         require(session.store.pendingTake != nil && session.sync.displaySeconds > 46.3, "MTC starts capture and follows Logic without audio callbacks or an editor")
@@ -184,7 +186,7 @@ struct SessionIntegration {
         var after = COTransport(); _ = COReadTransport(bridge, &after)
         require(before.renderCount == after.renderCount, "No audio callback was needed")
         let linkedClip = session.store.project.timeline.lanes[0].clips.last!
-        require(session.store.pendingTake == nil && session.store.hasArmedLane && abs(linkedClip.timelineStartSeconds - 44) < 0.1 && linkedClip.durationSeconds > 2.3, "MMC Stop saves a real timed movie and remains armed")
+        require(session.store.pendingTake == nil && !session.store.hasArmedLane && abs(linkedClip.timelineStartSeconds - 44) < 0.1 && linkedClip.durationSeconds > 2.3, "MMC Stop saves a real timed movie and disarms")
         locate(12)
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         require(abs(session.sync.displaySeconds - 12) < 0.01 && session.store.pendingTake == nil, "Stopped backward locate moves the playhead without a false take")
@@ -274,7 +276,7 @@ struct SessionIntegration {
             window.setContentSize(NSSize(width: 1280, height: 820))
             view.setFrameSize(NSSize(width: 1280, height: 820))
             window.center()
-            window.title = "CamOrder Studio 0.4.0"
+            window.title = "CamOrder Studio 0.5.0"
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             view.layoutSubtreeIfNeeded()
             let fullScreenshot = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("editor-full-session.png")
@@ -285,11 +287,13 @@ struct SessionIntegration {
                 view.cacheDisplay(in: view.bounds, to: bitmap)
                 try bitmap.representation(using: .png, properties: [:])?.write(to: fullScreenshot)
             }
+            try runEditorInteractionRegression(view: view, window: window, session: session, host: host)
             window.orderOut(nil)
         }
         session.close()
         COTestHostDispose(host)
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        try runRestoredSessionRegression()
         try runMultiInputRegression()
     }
 }

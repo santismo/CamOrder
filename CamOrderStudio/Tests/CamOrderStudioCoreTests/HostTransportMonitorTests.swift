@@ -44,7 +44,9 @@ final class HostTransportMonitorTests: XCTestCase {
     func testConfirmedBackwardSeekIsReportedButOneBadPositionIsIgnored() {
         var monitor = HostTransportMonitor()
         _ = monitor.update(seconds: 20, reportedPlaying: true, valid: true, reportTime: 10, now: 10)
-        XCTAssertEqual(monitor.update(seconds: 0, reportedPlaying: true, valid: true, reportTime: 10.02, now: 10.02).event, .none)
+        let glitch = monitor.update(seconds: 0, reportedPlaying: true, valid: true, reportTime: 10.02, now: 10.02)
+        XCTAssertEqual(glitch.event, .none)
+        XCTAssertEqual(glitch.seconds, 20, "An isolated zero cannot move the playhead or viewport")
         XCTAssertEqual(monitor.update(seconds: 20.04, reportedPlaying: true, valid: true, reportTime: 10.04, now: 10.04).event, .none)
         _ = monitor.update(seconds: 4, reportedPlaying: true, valid: true, reportTime: 10.06, now: 10.06)
         XCTAssertEqual(monitor.update(seconds: 4.02, reportedPlaying: true, valid: true, reportTime: 10.08, now: 10.08).event, .relocated)
@@ -56,4 +58,39 @@ final class HostTransportMonitorTests: XCTestCase {
         XCTAssertTrue(update.playing)
         XCTAssertEqual(update.event, .none)
     }
+    func testStoppedZeroGlitchDoesNotFlashTheStartDuringPlayback() {
+        var monitor = HostTransportMonitor()
+        _ = monitor.update(seconds: 250, reportedPlaying: true, valid: true, reportTime: 100, now: 100)
+        let suspect = monitor.update(seconds: 0, reportedPlaying: false, valid: true, reportTime: 100.02, now: 100.02)
+        XCTAssertEqual(suspect.seconds, 250)
+        let recovered = monitor.update(seconds: 250.04, reportedPlaying: true, valid: true, reportTime: 100.04, now: 100.04)
+        XCTAssertEqual(recovered.seconds, 250.04)
+        XCTAssertEqual(recovered.event, .none)
+    }
+
+    @MainActor
+    func testStoppedPreviewYieldsToLogicMovementAndPlay() {
+        let sync = LogicSyncEngine(isHosted: true)
+        sync.receiveHostPosition(seconds: 90, playing: false, tempo: 120, available: true)
+        sync.preview(at: 100)
+        sync.receiveHostPosition(seconds: 90, playing: false, tempo: 120, available: true)
+        XCTAssertEqual(sync.editorSeconds, 100)
+        XCTAssertEqual(sync.displaySeconds, 90, "Preview never changes the recording clock")
+        sync.receiveHostPosition(seconds: 92, playing: false, tempo: 120, available: true)
+        XCTAssertEqual(sync.editorSeconds, 92)
+        sync.preview(at: 100)
+        sync.receiveHostPosition(seconds: 92, playing: true, tempo: 120, available: true)
+        XCTAssertEqual(sync.editorSeconds, 92)
+        sync.preview(at: 0)
+        XCTAssertEqual(sync.editorSeconds, 92, "Scrubbing cannot override a rolling host")
+    }
+
+    func testTimelineCenterAndPinchAnchorStayStableFarFromStart() {
+        XCTAssertEqual(TimelineViewport.centeredOrigin(seconds: 2, scale: 18, viewportWidth: 600, contentWidth: 10000), 0)
+        XCTAssertEqual(TimelineViewport.centeredOrigin(seconds: 300, scale: 18, viewportWidth: 600, contentWidth: 10000), 5100)
+        let zoomed = TimelineViewport.zoomedOrigin(oldOrigin: 5100, oldScale: 18, newScale: 36, anchorX: 300)
+        XCTAssertEqual(zoomed, 10500)
+        XCTAssertEqual((zoomed + 300) / 36, 300, "The time under the pinch remains stationary")
+    }
+
 }

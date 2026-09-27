@@ -85,12 +85,19 @@ func runMultiInputRegression() throws {
     session.store.saveProject()
     let reopened = try ProjectDocument.open(at: folder)
     require(reopened.project.defaultCaptureSourceID == a.selectedDeviceID && reopened.project.timeline.lanes[0].captureSourceID == nil && reopened.project.timeline.lanes[1].captureSourceID == b.selectedDeviceID, "Default and per-lane assignments survive reopening")
-    // Actual plug-in UI, with three configured input cards and recorded regions.
+    require(!session.store.hasArmedLane, "All four lanes disarm after host Stop")
+    for (index, pose) in [ClipFraming(zoom: 0.48, offsetX: -0.48, offsetY: -0.48),
+                          ClipFraming(zoom: 0.48, offsetX: 0.48, offsetY: -0.48),
+                          ClipFraming(zoom: 0.48, offsetX: -0.48, offsetY: 0.48)].enumerated() {
+        let clip = session.store.project.timeline.lanes[index].clips.last!
+        session.store.updateClipFraming(clip.id, zoom: pose.zoom, offsetX: pose.offsetX, offsetY: pose.offsetY, save: true)
+    }
+    // Actual plug-in UI, with four input cards and simultaneous layered regions.
     pump(0.25, 40.5, false)
     let view = Unmanaged<NSView>.fromOpaque(createCamOrderView(bridge)).takeRetainedValue()
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 960), styleMask: [.titled,.resizable], backing: .buffered, defer: false)
     window.contentView = view; window.setContentSize(NSSize(width: 1280, height: 960)); view.setFrameSize(NSSize(width: 1280, height: 960))
-    window.title = "CamOrder Studio 0.4.0"; window.center(); window.makeKeyAndOrderFront(nil)
+    window.title = "CamOrder Studio 0.5.0"; window.center(); window.makeKeyAndOrderFront(nil)
     RunLoop.main.run(until: Date().addingTimeInterval(0.8)); view.layoutSubtreeIfNeeded()
     if CommandLine.arguments.count > 1, let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
         let url = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("editor-multicam.png")

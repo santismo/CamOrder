@@ -48,7 +48,7 @@ func runEditingRegression() throws {
     require(store.project.timeline.lanes[0].clips == unchanged[0].clips, "Sync adjustments do not rewrite edit points")
     let offsetSelection = ExportRangeSelection(project: store.project, selectedClip: store.selectedClip(), playhead: 10)
     offsetSelection.choice = .selected
-    require(abs(offsetSelection.range!.startSeconds - (store.selectedClip()!.timelineStartSeconds - 0.03)) < 0.00001)
+    require(abs(offsetSelection.range!.startSeconds - store.selectedClip()!.timelineStartSeconds) < 0.00001)
     offsetSelection.choice = .custom; offsetSelection.startText = "11.25"; offsetSelection.endText = "12.5"
     require(offsetSelection.range!.durationSeconds == 1.25)
     let beforeCut = store.selectedClip()!
@@ -58,6 +58,38 @@ func runEditingRegression() throws {
     require(offsetReopen.project.sync.videoOffsetMS == -42.6 && offsetReopen.project.timeline.lanes[0].videoOffsetMS == 12.6)
     store.setVideoOffsetMS(0); store.setVideoOffsetMS(0, laneID: "top")
     print("PASS: non-destructive project/lane offsets save and reopen; export ranges use edited boundaries; cuts remain aligned after offsets")
+    // Undo a deletion with live arming/pre-roll, without restoring stale arm state.
+    store.armLane("top")
+    store.startArmedBuffer(cameraDeviceId: "synthetic", laneID: "top")
+    let bufferFile = store.armedBuffers["top"]?.relativeVideoFile
+    let deleted = store.selectedClip()!
+    store.deleteSelectedClip()
+    require(store.clip(id: deleted.id) == nil)
+    store.undoProjectChange()
+    require(store.clip(id: deleted.id) == deleted && store.hasArmedLane, "Undo restores a deleted region without disarming")
+    require(store.armedBuffers["top"]?.relativeVideoFile == bufferFile, "Undo keeps the active pre-roll connection")
+    store.redoProjectChange(); require(store.clip(id: deleted.id) == nil && store.hasArmedLane)
+    store.undoProjectChange(); store.discardArmedBuffer(laneID: "top"); store.unarmAllLanes()
+    store.undoProjectChange()
+    require(!store.hasArmedLane, "History never silently rearms a lane")
+    store.redoProjectChange()
+    store.selectedClipId = top.id
+    var framingTime = 5.0
+    store.framingPlayheadSeconds = { framingTime }
+    store.insertAutomationMarker(at: 5)
+    let firstPose = store.clip(id: top.id)!.automatedFraming(atTimelineSecond: 5)
+    framingTime = 6
+    store.insertAutomationMarker(at: 6)
+    store.beginSelectedClipFramingEdit()
+    store.updateSelectedClipFraming(offsetX: -0.5, trackUndo: false)
+    store.endClipFramingEdit()
+    let animated = store.clip(id: top.id)!
+    require(animated.automatedFraming(atTimelineSecond: 5) == firstPose, "Editing a later marker must not move the first")
+    require(animated.automatedFraming(atTimelineSecond: 6).offsetX == -0.5)
+    require(animated.automatedFraming(atTimelineSecond: 5.5).offsetX != firstPose.offsetX, "The two markers animate position")
+    let savedAnimation = try ProjectDocument.open(at: folder)
+    require(savedAnimation.project.timeline.lanes[0].clips.first(where: { $0.id == top.id })!.automationMarkers == animated.automationMarkers)
+    print("PASS: armed/pre-roll delete Undo/Redo preserves live state; marker edits animate independently and save/reopen")
     store.project.timeline.lanes[0].isMuted = true
     require(store.playbackClip(at: 10)?.id == bottom.id)
     store.project.timeline.lanes[1].clips[0].isEnabled = false

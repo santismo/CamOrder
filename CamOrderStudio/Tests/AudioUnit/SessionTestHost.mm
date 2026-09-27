@@ -31,7 +31,7 @@ static OSStatus input(void *context, AudioUnitRenderActionFlags *flags, const Au
 void *COTestHostCreate() {
     auto *host = new TestHost;
     AudioComponentDescription description = {kAudioUnitType_Effect, 'CmSt', 'Sntm', 0, 0};
-    static auto component = AudioComponentRegister(&description, CFSTR("CamOrder Session Test"), 0x400, CamOrderStudioAUFactory);
+    static auto component = AudioComponentRegister(&description, CFSTR("CamOrder Session Test"), 0x500, CamOrderStudioAUFactory);
     if (!component || AudioComponentInstanceNew(component, &host->unit)) abort();
     AudioStreamBasicDescription format = {48000, kAudioFormatLinearPCM, kAudioFormatFlagsNativeFloatPacked | kAudioFormatFlagIsNonInterleaved, 4, 1, 4, 2, 32, 0};
     if (AudioUnitSetProperty(host->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof(format)) ||
@@ -54,6 +54,18 @@ int32_t COTestHostRender(void *value, double seconds, bool playing, bool recordi
     struct { UInt32 count; AudioBuffer buffers[2]; } buffers = {2, {{1, 0, nullptr}, {1, 0, nullptr}}};
     AudioUnitRenderActionFlags flags = 0;
     return AudioUnitRender(host.unit, &flags, &timestamp, 0, 512, (AudioBufferList *)&buffers);
+}
+int32_t COTestHostRestoreProject(void *value, CFDataRef data) {
+    auto &host = *(TestHost *)value;
+    CFPropertyListRef original = nullptr;
+    UInt32 size = sizeof(original);
+    auto result = AudioUnitGetProperty(host.unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &original, &size);
+    if (result != noErr) return result;
+    auto state = CFDictionaryCreateMutableCopy(nullptr, 0, (CFDictionaryRef)original);
+    CFDictionarySetValue(state, CFSTR("CamOrderProject"), data);
+    result = AudioUnitSetProperty(host.unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &state, sizeof(state));
+    CFRelease(state); CFRelease(original);
+    return result;
 }
 void COTestHostDispose(void *value) {
     auto *host = (TestHost *)value;

@@ -17,6 +17,7 @@ final class ProjectStore: ObservableObject {
     }
 
     var isHosted = false
+    let syncCalculator = SyncCalculatorModel()
     var framingPlayheadSeconds: (() -> Double)?
     private var framingEditTime: (clipID: String, localSeconds: Double)?
     var onDocumentChange: (() -> Void)?

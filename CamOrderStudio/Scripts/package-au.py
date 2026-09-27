@@ -43,6 +43,9 @@ def main():
         screenshot = repo / 'docs/images/camorder-studio-au.png'
         if screenshot.exists():
             shutil.copy2(screenshot, release / 'editor.png')
+        calculator_screenshot = repo / 'docs/images/camorder-sync-calculator.png'
+        if calculator_screenshot.exists():
+            shutil.copy2(calculator_screenshot, release / 'sync-calculator.png')
         installer = release / 'Install CamOrder Studio.command'
         installer.write_text('''#!/bin/bash
 set -euo pipefail

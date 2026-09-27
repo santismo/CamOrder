@@ -142,7 +142,7 @@ struct StudioShellView: View {
                             MediaBrowserView().frame(width: 340, height: 430).environmentObject(store)
                         }
                     Button { showSync.toggle() } label: { Label("Sync", systemImage: "slider.horizontal.3") }
-                        .popover(isPresented: $showSync) { VideoSyncPanel().environmentObject(store) }
+                        .popover(isPresented: $showSync) { VideoSyncPanel(calculator: store.syncCalculator).environmentObject(store) }
                     Spacer()
                     Menu {
                         Toggle("Live Input", isOn: $showLive)
@@ -174,7 +174,7 @@ struct StudioShellView: View {
                     } else { monitors }
                 }.padding(.horizontal, 8)
                 HStack {
-                    Text("CamOrder · AU 0.5.0").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.5.1").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -2850,9 +2850,18 @@ private struct LiveSourceHeader: View {
 
 private struct VideoSyncPanel: View {
     @EnvironmentObject private var store: ProjectStore
+    @ObservedObject var calculator: SyncCalculatorModel
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                Picker("Sync tools", selection: $calculator.showingCalculator) {
+                    Text("Offsets").tag(false)
+                    Text("Calculator").tag(true)
+                }.pickerStyle(.segmented)
+                if calculator.showingCalculator {
+                    SyncCalculatorView(model: calculator)
+                } else {
                 Text("Video sync").font(.headline)
                 Text("Negative moves video earlier. Positive moves it later. Project and lane adjustments add together in Main Stage and export.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -2865,8 +2874,14 @@ private struct VideoSyncPanel: View {
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Text("Original recordings and edit points stay unchanged. Reset to 0 ms at any time.")
                     .font(.caption).foregroundStyle(.secondary)
+                }
             }.padding(20)
-        }.frame(width: 330, height: min(560, CGFloat(210 + store.project.timeline.lanes.count * 68)))
+        }
+        .onChange(of: calculator.result) { result in
+            if result != nil { withAnimation { proxy.scrollTo("sync-calculator-result", anchor: .bottom) } }
+        }
+        }.frame(width: calculator.showingCalculator ? 440 : 330,
+                height: calculator.showingCalculator ? 650 : min(560, CGFloat(250 + store.project.timeline.lanes.count * 68)))
     }
 }
 

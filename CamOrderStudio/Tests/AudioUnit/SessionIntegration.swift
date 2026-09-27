@@ -202,6 +202,7 @@ struct SessionIntegration {
         require(hostView.keys == [15,49], "R and Space are delivered exactly once to the host responder")
         print("PASS: R and Space keyboard handoff reaches the host responder exactly once")
         try runEditingRegression()
+        try runSyncCalculatorRegression()
         // Visual fixture: actual recorded media and a 4K canvas in the small editor.
         session.store.unarmAllLanes()
         session.store.selectedClipId = linkedClip.id
@@ -276,7 +277,7 @@ struct SessionIntegration {
             window.setContentSize(NSSize(width: 1280, height: 820))
             view.setFrameSize(NSSize(width: 1280, height: 820))
             window.center()
-            window.title = "CamOrder Studio 0.5.0"
+            window.title = "CamOrder Studio 0.5.1"
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             view.layoutSubtreeIfNeeded()
             let fullScreenshot = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("editor-full-session.png")

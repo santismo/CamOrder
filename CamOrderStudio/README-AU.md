@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.5.0 development build
+# CamOrder Studio Audio Unit — 0.5.1 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -61,6 +61,22 @@ Open **Sync** for the whole-project offset and each lane’s offset. The sliders
 
 The controls allow ±5000 ms each. Video shifted before project zero is clipped at zero. Imported master audio stays on its own project clock; camera audio, if explicitly included in export, travels with its video. Existing projects retain any previously saved legacy clip timing adjustments in addition to these new controls.
 
+## Sync calculator
+
+Open **Sync → Calculator**. Milliseconds are the default: enter `01:00:36.240` or the shorter `00:36.240`.
+
+1. Export with your current sync settings and put the movie at its noted start in Logic. Pause at a moment where both Logic’s clock and the same clock recorded inside the video are readable.
+2. Enter **Actual Logic time** and **Clock visible inside the video**, using the same display format and SMPTE view offset for both. Use the clock shown *inside* the picture, not the movie player’s elapsed-time counter.
+3. Choose **Whole project** or the lane to adjust, then **Calculate**. A smaller clock reading inside the video means it is late: the suggested correction is negative, moving video earlier.
+4. Review the correction and the proposed offset. **Apply offset** adds the measured correction to the chosen current setting. For example, a −80 ms residual correction changes an existing −82 ms setting to −162 ms. Other lane settings stay unchanged.
+5. Re-export and import at the same Logic position, then check again. Original recordings stay intact; existing movie files do not change until re-exported. Undo reverses Apply.
+
+Entries and results survive dismissing the Sync popover or closing/reopening the editor within the same AU session. The same calculated result cannot be applied twice. Changed edits/offsets make the result stale; calculate again using a fresh matching export. Apply is unavailable while armed/recording and when the proposed setting exceeds ±5000 ms.
+
+The format selector also supports SMPTE frames, frames with 80 subframes per frame, seconds plus samples, frames plus samples, and frames plus milliseconds. Frame formats require the **Logic timecode frame rate**; sample formats also require Logic’s project sample rate. Drop-frame rates are explicit. For frames with a fractional field, separate the fields (for example, `00:36:16.36` for 16 frames and 36 bits). The calculator shows how each reading was interpreted and rejects invalid values instead of guessing what a long string of digits means. [Apple’s display-format guide](https://support.apple.com/guide/logicpro/customize-the-control-bar-lgcp5bdd6d9d/mac) explains Logic’s options.
+
+A single measurement estimates a constant offset. If the mismatch changes at different parts of the recording, one offset cannot correct that drift. Millisecond entry does not remove the exported movie’s frame-rate granularity.
+
 ## Inputs
 
 - Built-in cameras and USB webcams exposed by macOS.
@@ -96,11 +112,12 @@ Stopped cursor movement can only be followed when Logic sends a position report.
 
 Live frames now update a native image layer directly. Timeline geometry and filmstrips no longer rebuild with every playhead tick; moving cursors and clocks update separately. Playback seeks are serialized, and resuming the decoder uses the requested host-clock anchor so seek completion does not leave a persistent playback delay.
 
-The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **360 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
+The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **350 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
 
 ## Verification
 
-- 39 Swift tests: independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
+- 47 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
+- Calculator session regression: project/lane Apply, existing-offset refinement, save/reopen, Undo, repeated/stale/out-of-range protection and inputs retained across editor recreation.
 - Installed-component validation with Apple’s `auval` for `aufx / CmSt / Sntm`.
 - Bit-exact mono/stereo pass-through at 44.1, 48 and 96 kHz, including silent input and 1/64/512-frame blocks; independent Audio Unit instance state.
 - Native editor creation, close/reopen and screenshots at 1280 × 820, 820 × 520, 1120 × 460, 760 × 440, arbitrary 803 × 417, and minimum 720 × 360; the four-input overview is also captured at 1280 × 960.

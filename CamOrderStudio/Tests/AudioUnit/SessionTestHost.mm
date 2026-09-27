@@ -31,7 +31,7 @@ static OSStatus input(void *context, AudioUnitRenderActionFlags *flags, const Au
 void *COTestHostCreate() {
     auto *host = new TestHost;
     AudioComponentDescription description = {kAudioUnitType_Effect, 'CmSt', 'Sntm', 0, 0};
-    static auto component = AudioComponentRegister(&description, CFSTR("CamOrder Session Test"), 0x500, CamOrderStudioAUFactory);
+    static auto component = AudioComponentRegister(&description, CFSTR("CamOrder Session Test"), 0x501, CamOrderStudioAUFactory);
     if (!component || AudioComponentInstanceNew(component, &host->unit)) abort();
     AudioStreamBasicDescription format = {48000, kAudioFormatLinearPCM, kAudioFormatFlagsNativeFloatPacked | kAudioFormatFlagIsNonInterleaved, 4, 1, 4, 2, 32, 0};
     if (AudioUnitSetProperty(host->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof(format)) ||

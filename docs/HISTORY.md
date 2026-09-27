@@ -2,7 +2,7 @@
 
 [← Current CamOrder Studio plug-in](../README.md)
 
-CamOrder's current focus is **CamOrder Studio AU 0.5.0**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.0) or read its [guide](../CamOrderStudio/README-AU.md).
+CamOrder's current focus is **CamOrder Studio AU 0.5.1**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.1) or read its [guide](../CamOrderStudio/README-AU.md).
 
 **Older versions are still available, but they are buggy, unsupported historical builds.** They may contain recording, transport, editing or export problems fixed in later versions. Keep a separate copy of your project before opening it with an older version. Their original instructions describe their behavior at the time and do not replace the current guide.
 
@@ -12,6 +12,7 @@ The [historical AU archive](https://github.com/santismo/CamOrder/releases/tag/le
 
 | Version | Development stage | Download |
 | --- | --- | --- |
+| 0.5.0 | Fixed export anchors and independent lane offsets, layered video, framing markers and one host transport. Superseded by the built-in sync calculator. | [0.5.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.0) |
 | 0.4.0 | Multiple camera inputs and shared defaults. Superseded: edited-timeline export could cancel sync offsets; single top-region playback and older editing/transport behavior. | [0.4.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.4.0) |
 | 0.3.0 | Dark resizable workspace, hidden controls, export ranges and lane/project sync; one live input. | [0.3.0 archive](https://github.com/santismo/CamOrder/releases/download/legacy-au-archive/CamOrder-Studio-AU-0.3.0-Intel-macOS-LEGACY.zip) |
 | 0.2.5 | Framing, top-region priority, split and trim fixes; older UI and export workflow. | [0.2.5 archive](https://github.com/santismo/CamOrder/releases/download/legacy-au-archive/CamOrder-Studio-AU-0.2.5-Intel-macOS-LEGACY.zip) |

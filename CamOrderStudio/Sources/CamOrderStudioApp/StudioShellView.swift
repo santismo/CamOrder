@@ -174,7 +174,7 @@ struct StudioShellView: View {
                     } else { monitors }
                 }.padding(.horizontal, 8)
                 HStack {
-                    Text("CamOrder · AU 0.5.1").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.5.2").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -275,10 +275,8 @@ struct StudioShellView: View {
             syncEngine.followHost(); editPlayback.pause(); editPlayback.isEditMode = false
             return hostTransportKey?(event) ?? false
         }
-        if modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "z" {
-            modifierFlags.contains(.shift) ? store.redoProjectChange() : store.undoProjectChange()
-            return true
-        }
+        if store.handleProjectShortcut(event, at: activePlayheadSeconds) { return true }
+        guard !modifierFlags.contains(.command), !modifierFlags.contains(.control), !modifierFlags.contains(.option) else { return false }
 
         if event.keyCode == 51 || event.keyCode == 117 {
             store.deleteSelectedClip()
@@ -434,7 +432,9 @@ private final class KeyMonitorNSView: NSView {
         } else if monitor == nil {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, event.window === self.window, self.window?.isKeyWindow == true else { return event }
-                guard !Self.isTextInputActive else { return event }
+                let isSave = event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command
+                    && event.charactersIgnoringModifiers?.lowercased() == "s"
+                guard !Self.isTextInputActive || isSave else { return event }
                 return self.onKeyDown?(event) == true ? nil : event
             }
         }
@@ -487,6 +487,7 @@ private struct TransportSyncBar: View {
     @EnvironmentObject private var store: ProjectStore
     @StateObject private var renderEngine = RenderExportEngine()
     @State private var isRendering = false
+    @State private var showsSaved = false
     var compact = false
     var recordInHost: (() -> Void)?
     var playInHost: (() -> Void)?
@@ -500,7 +501,7 @@ private struct TransportSyncBar: View {
                     Button("New Project…") { store.createProject() }
                     Button("Open Project…") { store.openProject() }
                     Divider()
-                    Button("Save") { store.saveProject() }.disabled(!store.hasOpenProject)
+                    Button("Save") { store.saveProjectManually() }.disabled(!store.hasOpenProject)
                     Button("Save a Copy…") { store.saveProjectAs() }.disabled(!store.hasOpenProject)
                     if let url = store.lastExportURL { Button("Show last export") { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
                 } label: { Text(store.document?.project.name ?? "Open a project").lineLimit(1) }
@@ -508,6 +509,11 @@ private struct TransportSyncBar: View {
                 .disabled(cameraEngine.isRecording || cameraEngine.isFinishingRecording || store.hasCaptureActivity)
                 Spacer()
                 if isRendering { ProgressView(value: renderEngine.progress).frame(width: 70) }
+                Button { store.saveProjectManually() } label: {
+                    Label(showsSaved ? "Saved" : "Save", systemImage: showsSaved ? "checkmark" : "square.and.arrow.down")
+                }
+                .disabled(!store.hasOpenProject)
+                .help("Save CamOrder project (⌘S). Edits also save automatically.")
                 Button { renderProject() } label: { Label("Export", systemImage: "square.and.arrow.up") }
                     .buttonStyle(.borderedProminent)
                     .disabled(!store.hasOpenProject || isRendering || cameraEngine.isRecording || cameraEngine.isFinishingRecording || store.hasCaptureActivity)
@@ -515,6 +521,12 @@ private struct TransportSyncBar: View {
             HStack(spacing: 10) { transportStatus; Spacer(minLength: 4); editControls }
         }
         .controlSize(.small).padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
+        .task(id: store.lastManualSaveAt) {
+            guard store.lastManualSaveAt != nil else { return }
+            showsSaved = true
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !Task.isCancelled { showsSaved = false }
+        }
         .onAppear {
             guard !syncEngine.isHosted else { return }
             startArmedBufferIfNeeded()
@@ -1797,14 +1809,14 @@ private struct TimelineView: View {
                         store.cutSelectedClip(at: activePlayheadSeconds)
                     }
                     .disabled(store.selectedClip() == nil)
-                    SymbolToolButton(systemImage: "arrow.left.to.line.compact", help: "Snap Start") {
-                        store.snapSelectedClipStartToGrid()
+                    SymbolToolButton(systemImage: "doc.on.doc", help: "Copy Region (⌘C)") {
+                        store.copySelectedRegion()
                     }
                     .disabled(store.selectedClip() == nil)
-                    SymbolToolButton(systemImage: "arrow.right.to.line.compact", help: "Snap End") {
-                        store.snapSelectedClipEndToGrid()
+                    SymbolToolButton(systemImage: "doc.on.clipboard", help: "Paste at Playhead on the Copied Region’s Lane (⌘V)") {
+                        store.pasteRegion(at: activePlayheadSeconds)
                     }
-                    .disabled(store.selectedClip() == nil)
+                    .disabled(!store.canPasteRegion)
                     SymbolToolButton(systemImage: "trash", help: "Delete Region") {
                         store.deleteSelectedClip()
                     }
@@ -1863,6 +1875,12 @@ private struct TimelineView: View {
                                                 timelineGrid(height: 56)
                                             }
                                             .opacity(lane.isMuted ? 0.58 : 1)
+                                            .contentShape(Rectangle())
+                                            .gesture(seekGesture)
+                                            .contextMenu {
+                                                Button("Paste Region Here at Playhead") { store.pasteRegion(at: activePlayheadSeconds, laneID: lane.id) }
+                                                    .disabled(!store.canPasteRegion)
+                                            }
                                         ForEach(lane.clips) { originalClip in
                                             let clip = store.project.presentedClip(originalClip, laneID: lane.id)
                                             ClipBlock(
@@ -1870,6 +1888,11 @@ private struct TimelineView: View {
                                                 videoURL: videoURL(for: clip),
                                                 secondsToPixels: secondsToPixels,
                                                 isSelected: store.selectedClipId == clip.id,
+                                                sourceDuration: store.mediaAsset(for: clip)?.durationSeconds,
+                                                earliestStart: min(clip.timelineStartSeconds, max(0, clip.timelineStartSeconds - clip.trimInSeconds)),
+                                                onSelect: {
+                                                    store.selectedClipId = clip.id; store.selectedMediaAssetId = clip.mediaAssetId
+                                                },
                                                 onMarker: { seconds in
                                                     store.selectedClipId = clip.id; store.selectedMediaAssetId = clip.mediaAssetId
                                                     seekTimelineIfEditing(locationX: CGFloat(seconds * secondsToPixels))
@@ -1885,12 +1908,27 @@ private struct TimelineView: View {
                                                 }
                                             )
                                                 .offset(x: clip.timelineStartSeconds * secondsToPixels)
+                                                .zIndex(store.selectedClipId == clip.id ? 1 : 0)
                                                 .opacity(lane.isMuted ? 0.55 : 1)
                                                 .onTapGesture {
                                                     store.selectedClipId = clip.id
                                                     store.selectedMediaAssetId = clip.mediaAssetId
                                                 }
                                                 .contextMenu {
+                                                    Button("Copy Region") {
+                                                        store.selectedClipId = clip.id
+                                                        store.copySelectedRegion()
+                                                    }
+                                                    Button("Paste at Playhead on This Lane") { store.pasteRegion(at: activePlayheadSeconds, laneID: lane.id) }
+                                                        .disabled(!store.canPasteRegion)
+                                                    Divider()
+                                                    Button("Snap Left Edge to Grid") {
+                                                        store.selectedClipId = clip.id; store.snapSelectedClipStartToGrid()
+                                                    }
+                                                    Button("Snap Right Edge to Grid") {
+                                                        store.selectedClipId = clip.id; store.snapSelectedClipEndToGrid()
+                                                    }
+                                                    Divider()
                                                     Button {
                                                         store.selectedClipId = clip.id
                                                         store.selectedMediaAssetId = clip.mediaAssetId
@@ -2360,6 +2398,9 @@ private struct ClipBlock: View {
     let videoURL: URL?
     let secondsToPixels: Double
     let isSelected: Bool
+    let sourceDuration: Double?
+    let earliestStart: Double
+    let onSelect: () -> Void
     let onMarker: (Double) -> Void
     let onMove: (Double) -> Void
     let onResizeStart: (Double) -> Void
@@ -2371,9 +2412,10 @@ private struct ClipBlock: View {
     var body: some View {
         let leftDelta = clampedLeftDelta(previewLeftDeltaSeconds)
         let rightDelta = clampedRightDelta(previewRightDeltaSeconds, leftDelta: leftDelta)
-        let previewDuration = max(0.1, clip.durationSeconds - leftDelta + rightDelta)
+        let previewDuration = max(min(0.1, clip.durationSeconds), clip.durationSeconds - leftDelta + rightDelta)
         let width = max(1, previewDuration * secondsToPixels)
-        let handleWidth = min(9, width / 3)
+        let leftGripOffset = width < 42 ? -min(12, max(0, (clip.timelineStartSeconds + leftDelta) * secondsToPixels)) : 0
+        let rightGripOffset = width < 42 ? max(12, leftGripOffset + 28 - width) : 0
         ZStack {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.black.opacity(0.46))
@@ -2392,53 +2434,20 @@ private struct ClipBlock: View {
                 .fill(clipOverlayColor(hasVideo: videoURL != nil))
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(isSelected ? Color.yellow : Color.clear, lineWidth: 3)
-            HStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.white.opacity(0.45))
-                    .frame(width: handleWidth, height: 30)
-                    .clipShape(Capsule())
-                    .gesture(
-                        DragGesture(minimumDistance: 2, coordinateSpace: .global)
-                            .onChanged { value in
-                                previewLeftDeltaSeconds = clampedLeftDelta(seconds(for: value.translation.width))
-                            }
-                            .onEnded { value in
-                                let deltaSeconds = clampedLeftDelta(seconds(for: value.translation.width))
-                                onResizeStart(clip.timelineStartSeconds + deltaSeconds)
-                                previewLeftDeltaSeconds = 0
-                            }
-                    )
-                Rectangle()
-                    .fill(Color.white.opacity(0.001))
-                    .frame(width: max(0, width - handleWidth * 2), height: 40)
-                    .gesture(
-                        DragGesture(minimumDistance: 2, coordinateSpace: .global)
-                            .onChanged { value in
-                                previewMoveSeconds = clampedMoveDelta(seconds(for: value.translation.width))
-                            }
-                            .onEnded { value in
-                                let deltaSeconds = clampedMoveDelta(seconds(for: value.translation.width))
-                                onMove(max(0, clip.timelineStartSeconds + deltaSeconds))
-                                previewMoveSeconds = 0
-                            }
-                    )
-                Rectangle()
-                    .fill(Color.white.opacity(0.45))
-                    .frame(width: handleWidth, height: 30)
-                    .clipShape(Capsule())
-                    .gesture(
-                        DragGesture(minimumDistance: 2, coordinateSpace: .global)
-                            .onChanged { value in
-                                previewRightDeltaSeconds = clampedRightDelta(seconds(for: value.translation.width), leftDelta: leftDelta)
-                            }
-                            .onEnded { value in
-                                let deltaSeconds = clampedRightDelta(seconds(for: value.translation.width), leftDelta: leftDelta)
-                                onResizeEnd(clip.durationSeconds + deltaSeconds)
-                                previewRightDeltaSeconds = 0
-                            }
-                    )
-            }
-            .frame(width: width, height: 40, alignment: .trailing)
+            Rectangle()
+                .fill(Color.white.opacity(0.001))
+                .frame(width: width, height: 40)
+                .gesture(
+                    DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                        .onChanged { value in
+                            onSelect()
+                            previewMoveSeconds = clampedMoveDelta(seconds(for: value.translation.width))
+                        }
+                        .onEnded { value in
+                            onMove(max(0, clip.timelineStartSeconds + clampedMoveDelta(seconds(for: value.translation.width))))
+                            previewMoveSeconds = 0
+                        }
+                )
             .overlay {
                 VStack(spacing: 2) {
                     Text(clip.clipId)
@@ -2465,8 +2474,30 @@ private struct ClipBlock: View {
             }
         }
         .frame(width: width, height: 40)
-        .clipped()
-        .offset(x: (previewMoveSeconds + leftDelta) * secondsToPixels)
+        .overlay(alignment: .leading) {
+            RegionTrimHandle(clipID: clip.id, left: true, selected: isSelected, onSelect: onSelect,
+                onChange: { previewLeftDeltaSeconds = clampedLeftDelta(seconds(for: $0)) },
+                onEnd: { delta in
+                    onResizeStart(clip.timelineStartSeconds + clampedLeftDelta(seconds(for: delta)))
+                    previewLeftDeltaSeconds = 0
+                })
+                .frame(width: 14, height: 40)
+                .offset(x: leftGripOffset)
+        }
+        .overlay(alignment: .trailing) {
+            RegionTrimHandle(clipID: clip.id, left: false, selected: isSelected, onSelect: onSelect,
+                onChange: { previewRightDeltaSeconds = clampedRightDelta(seconds(for: $0), leftDelta: 0) },
+                onEnd: { delta in
+                    onResizeEnd(clip.durationSeconds + clampedRightDelta(seconds(for: delta), leftDelta: 0))
+                    previewRightDeltaSeconds = 0
+                })
+                .frame(width: 14, height: 40)
+                .offset(x: rightGripOffset)
+        }
+        // Keep exterior grips inside the parent hit-test bounds without changing
+        // the region's actual timeline width or source time.
+        .padding(.horizontal, 28)
+        .offset(x: (previewMoveSeconds + leftDelta) * secondsToPixels - 28)
     }
 
     private var visibleAutomationMarkers: [ClipAutomationMarker] {
@@ -2515,11 +2546,14 @@ private struct ClipBlock: View {
     }
 
     private func clampedLeftDelta(_ seconds: Double) -> Double {
-        min(max(seconds, -min(clip.timelineStartSeconds, clip.trimInSeconds)), max(0, clip.durationSeconds - 0.1))
+        min(max(seconds, earliestStart - clip.timelineStartSeconds), max(0, clip.durationSeconds - 0.1))
     }
 
     private func clampedRightDelta(_ seconds: Double, leftDelta: Double) -> Double {
-        max(seconds, -clip.durationSeconds + leftDelta + 0.1)
+        let minimum = min(0.1, clip.durationSeconds)
+        let available = (sourceDuration ?? clip.trimOutSeconds).map { max(0, $0 - clip.trimInSeconds - (clip.playbackSyncOffsetSeconds ?? 0)) }
+        let maximumDelta = available.map { $0 - clip.durationSeconds } ?? Double.infinity
+        return min(maximumDelta, max(seconds, -clip.durationSeconds + leftDelta + minimum))
     }
 }
 

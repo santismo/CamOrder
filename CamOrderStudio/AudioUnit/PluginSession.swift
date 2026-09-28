@@ -365,6 +365,17 @@ final class EditorResizeTarget {
 
 @MainActor
 private final class ResizableEditorView<Content: View>: NSHostingView<Content> {
+    var onProjectCommand: ((NSEvent) -> Bool)?
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.isKeyWindow == true else { return super.performKeyEquivalent(with: event) }
+        let isSave = event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command
+            && event.charactersIgnoringModifiers?.lowercased() == "s"
+        if let responder = window?.firstResponder, (responder is NSTextView || responder is NSTextField), !isSave {
+            return super.performKeyEquivalent(with: event)
+        }
+        if onProjectCommand?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window, let content = window.contentView,
@@ -400,6 +411,10 @@ func createCamOrderView(_ pointer: OpaquePointer) -> UnsafeMutableRawPointer {
             resizeEditor: { resizeTarget.resize(to: $0) },
             hostTransportKey: { resizeTarget.forwardTransportKey($0) }).environmentObject(session.store).preferredColorScheme(.dark))
         view.sizingOptions = []
+        view.onProjectCommand = { [weak session] event in
+            guard let session else { return false }
+            return session.store.handleProjectShortcut(event, at: session.sync.editorSeconds)
+        }
         resizeTarget.view = view
         view.frame = NSRect(x: 0, y: 0, width: 1280, height: 820)
         view.autoresizingMask = [.width, .height]

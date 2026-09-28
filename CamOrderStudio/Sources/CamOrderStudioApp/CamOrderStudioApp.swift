@@ -25,7 +25,7 @@ struct CamOrderStudioApp: App {
 
             CommandGroup(after: .saveItem) {
                 Button("Save Project") {
-                    projectStore.saveProject()
+                    projectStore.saveProjectManually()
                 }
                 .keyboardShortcut("s")
                 .disabled(projectStore.document == nil)

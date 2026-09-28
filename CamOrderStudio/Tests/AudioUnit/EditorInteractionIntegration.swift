@@ -64,6 +64,74 @@ func runEditorInteractionRegression(view: NSView, window: NSWindow, session: Plu
     require(session.store.project.timeline.lanes[0].name == "Committed by clicking away" && name.currentEditor() == nil, "Clicking the canvas commits and releases lane-name focus")
     let scroller = descendants(view).compactMap { $0 as? TimelineNativeScrollView }.first!
     require(scroller.contentView.bounds.minX < 1, "Opening near the timeline start waits for layout and shows the beginning")
+    // Test production trim handles through window mouse dispatch, including the
+    // narrow-region layout. Each gesture must commit once and remain undoable.
+    let store = session.store
+    var fixture = store.project.timeline.lanes[0].clips[0]
+    fixture.timelineStartSeconds = 4; fixture.trimInSeconds = 0; fixture.durationSeconds = 2
+    store.project.timeline.lanes[0].clips = [fixture]
+    store.selectedClipId = fixture.id
+    session.sync.preview(at: 5)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    func trim(left: Bool, pixels: CGFloat) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        view.layoutSubtreeIfNeeded()
+        let id = "trim-\(left ? "left" : "right")-\(fixture.id)"
+        guard let handle = descendants(view).first(where: { $0.identifier?.rawValue == id }) else { fatalError("Missing trim handle \(id)") }
+        let point = handle.convert(NSPoint(x: handle.bounds.midX, y: handle.bounds.midY), to: nil)
+        for step in 0...6 {
+            let type: NSEvent.EventType = step == 0 ? .leftMouseDown : (step == 6 ? .leftMouseUp : .leftMouseDragged)
+            let delta = pixels * CGFloat(min(step, 5)) / 5
+            send(NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x + delta, y: point.y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!)
+        }
+    }
+    trim(left: true, pixels: 9)
+    require(abs(store.clip(id: fixture.id)!.timelineStartSeconds - 4.5) < 0.001, "Dragging the left handle changes the start by 0.5 seconds")
+    require(abs(store.clip(id: fixture.id)!.trimInSeconds - 0.5) < 0.001 && abs(store.clip(id: fixture.id)!.durationSeconds - 1.5) < 0.001)
+    store.undoProjectChange()
+    require(store.clip(id: fixture.id) == fixture, "One left-edge drag is one Undo step")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    trim(left: false, pixels: -9)
+    require(abs(store.clip(id: fixture.id)!.durationSeconds - 1.5) < 0.001 && store.clip(id: fixture.id)!.timelineStartSeconds == 4,
+        "Right trim: expected start 4 and duration 1.5; got \(store.clip(id: fixture.id)!.timelineStartSeconds), \(store.clip(id: fixture.id)!.durationSeconds)")
+    store.undoProjectChange()
+    require(store.clip(id: fixture.id) == fixture, "One right-edge drag is one Undo step")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    trim(left: true, pixels: 9); trim(left: true, pixels: -9)
+    require(abs(store.clip(id: fixture.id)!.trimInSeconds) < 0.001, "Dragging left restores previously trimmed source")
+    store.updateClipStart(fixture.id, startSeconds: 0)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    trim(left: true, pixels: 9)
+    require(abs(store.clip(id: fixture.id)!.timelineStartSeconds - 0.5) < 0.001, "The left handle stays reachable at project zero")
+    // Dispatch to the production AU responder: Command-C must copy, never cut.
+    func command(_ key: String, code: UInt16) {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: code)!
+        require(view.performKeyEquivalent(with: event), "AU responder must handle Command-\(key)")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+    NSApp.activate(ignoringOtherApps: true)
+    window.makeKeyAndOrderFront(nil)
+    window.makeFirstResponder(view)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    require(window.isKeyWindow, "Shortcut regression requires the owned editor to have keyboard focus")
+    let countBefore = store.project.timeline.lanes[0].clips.count
+    command("c", code: 8)
+    require(store.canPasteRegion && store.project.timeline.lanes[0].clips.count == countBefore,
+        "Command-C copies without splitting; paste available \(store.canPasteRegion), regions \(store.project.timeline.lanes[0].clips.count), responder \(String(describing: window.firstResponder))")
+    session.sync.preview(at: 10)
+    command("v", code: 9)
+    require(store.project.timeline.lanes[0].clips.count == countBefore + 1 && abs(store.selectedClip()!.timelineStartSeconds - 10) < 0.001)
+    command("s", code: 1)
+    require(store.lastManualSaveAt != nil)
+    let saved = try ProjectDocument.open(at: store.document!.folderURL)
+    require(saved.project.timeline == store.project.timeline, "Command-S saves the edited timeline")
+    print("PASS: native left/right edge drags trim and restore footage with one-step Undo; Command-C/V/S copy, paste at playhead and save without cutting")
+    // End the trim gesture's deliberate two-second manual-scroll grace period
+    // before independently testing automatic transport following.
+    scroller.manualUntil = 0
     let before = ProcessInfo.processInfo.systemUptime
     while ProcessInfo.processInfo.systemUptime - before < 0.6 {
         require(COTestHostRender(host, 2000 + ProcessInfo.processInfo.systemUptime - before, true, false) == 0)

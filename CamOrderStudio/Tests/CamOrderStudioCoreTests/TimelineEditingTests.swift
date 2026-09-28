@@ -4,6 +4,20 @@ import AppKit
 @testable import CamOrderStudioCore
 
 final class TimelineEditingTests: XCTestCase {
+    func testTrimmingPasteAtZeroWithPositivePresentationOffset() {
+        var value = clip()
+        value.timelineStartSeconds = -0.038
+        let originalEnd = value.timelineStartSeconds + value.durationSeconds
+        value.trimLeftEdge(to: -0.038, minimumTimelineStart: -0.038)
+        XCTAssertEqual(value.timelineStartSeconds, -0.038, accuracy: 0.000001)
+        XCTAssertEqual(value.trimInSeconds, 2)
+        value.trimLeftEdge(to: 0.062, minimumTimelineStart: -0.038)
+        XCTAssertEqual(value.trimInSeconds, 2.1, accuracy: 0.000001)
+        XCTAssertEqual(value.timelineStartSeconds + value.durationSeconds, originalEnd, accuracy: 0.000001)
+        value.trimLeftEdge(to: -1, minimumTimelineStart: -0.038)
+        XCTAssertEqual(value.timelineStartSeconds, -0.038, accuracy: 0.000001)
+        XCTAssertEqual(value.trimInSeconds, 2, accuracy: 0.000001)
+    }
     private func clip(start: Double = 10, trim: Double = 2, duration: Double = 6) -> VideoClip {
         VideoClip(clipId: "take", mediaAssetId: "movie", videoFile: "source.mov", armedLaneId: "top",
                   logicStartTimecode: .from(seconds: start, frameRate: .fps30), logicStartSeconds: start,

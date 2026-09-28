@@ -26,6 +26,14 @@ final class ProjectStore: ObservableObject {
     @Published var selectedMediaAssetId: String?
     @Published var selectedClipId: String?
     @Published var lastError: String?
+    @Published private(set) var lastManualSaveAt: Date?
+    @Published private(set) var regionClipboard: RegionClipboard?
+
+    struct RegionClipboard {
+        let folderURL: URL
+        let clip: VideoClip
+        let media: MediaAsset
+    }
     @Published var pendingTakes: [String: PendingTakeRegion] = [:]
     @Published var captureEndSeconds: [String: Double] = [:]
     @Published var armedBuffers: [String: ArmedCaptureBuffer] = [:]
@@ -241,15 +249,73 @@ final class ProjectStore: ObservableObject {
         }
     }
 
-    func saveProject() {
-        guard let document else { return }
+    @discardableResult
+    func saveProject() -> Bool {
+        guard let document else { return false }
         do {
             try document.save()
             onDocumentChange?()
             lastError = nil
+            return true
         } catch {
             lastError = error.localizedDescription
+            return false
         }
+    }
+
+    func saveProjectManually() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        if saveProject() { lastManualSaveAt = Date() }
+    }
+
+    var canPasteRegion: Bool {
+        guard let document, let regionClipboard else { return false }
+        return document.folderURL.standardizedFileURL == regionClipboard.folderURL.standardizedFileURL
+            && !document.project.timeline.lanes.isEmpty
+    }
+
+    func copySelectedRegion() {
+        guard let document, let clip = selectedClip(), let media = mediaAsset(for: clip) else { return }
+        regionClipboard = RegionClipboard(folderURL: document.folderURL, clip: clip, media: media)
+    }
+
+    /// The clipboard keeps the original edit and media reference even if the source region is deleted.
+    func pasteRegion(at seconds: Double, laneID: String? = nil) {
+        guard seconds.isFinite, canPasteRegion, var document, let copied = regionClipboard else { return }
+        let destination = laneID ?? copied.clip.armedLaneId
+        guard let laneIndex = document.project.timeline.lanes.firstIndex(where: { $0.id == destination })
+                ?? (laneID == nil ? document.project.timeline.lanes.indices.first : nil) else { return }
+        let lane = document.project.timeline.lanes[laneIndex]
+        var clip = copied.clip
+        clip.id = UUID().uuidString
+        clip.clipId += "_copy"
+        clip.armedLaneId = lane.id
+        // Place the visible edge exactly at the playhead, including lane/project offsets.
+        clip.timelineStartSeconds = max(0, seconds) - document.project.videoOffsetSeconds(forLane: lane.id)
+        for index in clip.automationMarkers.indices { clip.automationMarkers[index].id = UUID().uuidString }
+        registerUndo(project: document.project)
+        if !document.project.media.contains(where: { $0.id == copied.media.id }) {
+            document.project.media.append(copied.media)
+        }
+        document.project.timeline.lanes[laneIndex].clips.append(clip)
+        document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
+        self.document = document
+        selectedClipId = clip.id
+        selectedMediaAssetId = clip.mediaAssetId
+        saveProject()
+    }
+
+    func handleProjectShortcut(_ event: NSEvent, at seconds: Double) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard modifiers.contains(.command), !modifiers.contains(.option), !modifiers.contains(.control) else { return false }
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "s" where !modifiers.contains(.shift): saveProjectManually()
+        case "c" where !modifiers.contains(.shift): copySelectedRegion()
+        case "v" where !modifiers.contains(.shift): pasteRegion(at: seconds)
+        case "z": modifiers.contains(.shift) ? redoProjectChange() : undoProjectChange()
+        default: return false
+        }
+        return true
     }
 
     func saveProjectAs() {
@@ -984,7 +1050,7 @@ final class ProjectStore: ObservableObject {
         editSelectedClipOnGrid { clip, gridSeconds in
             let offset = project.videoOffsetSeconds(forLane: clip.armedLaneId)
             let snappedStart = ((clip.timelineStartSeconds + offset) / gridSeconds).rounded() * gridSeconds - offset
-            clip.trimLeftEdge(to: snappedStart)
+            clip.trimLeftEdge(to: snappedStart, minimumTimelineStart: -offset)
         }
     }
 
@@ -1113,7 +1179,8 @@ final class ProjectStore: ObservableObject {
 
     func updateClipLeftEdge(_ clipId: String, startSeconds: Double) {
         editClip(clipId) { clip in
-            clip.trimLeftEdge(to: startSeconds - project.videoOffsetSeconds(forLane: clip.armedLaneId))
+            let offset = project.videoOffsetSeconds(forLane: clip.armedLaneId)
+            clip.trimLeftEdge(to: startSeconds - offset, minimumTimelineStart: -offset)
         }
     }
 

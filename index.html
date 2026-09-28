@@ -68,6 +68,19 @@
     .setup ol { padding-left: 24px; }
     .setup li { padding-left: 6px; margin: 14px 0; }
     .setup p { color: var(--muted); font-size: 15px; }
+    .shortcut-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 30px; }
+    .shortcut-group { min-width: 0; padding: 24px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+    .shortcut-group h3 { margin: 0 0 18px; }
+    .shortcuts { margin: 0; font-size: 15px; }
+    .shortcuts > div { display: grid; grid-template-columns: 135px 1fr; gap: 14px; padding: 13px 0; border-top: 1px solid var(--line); }
+    .shortcuts dt { color: var(--ink); }
+    .shortcuts dd { margin: 0; color: var(--muted); }
+    kbd { display: inline-block; padding: 0 6px; border: 1px solid #475550; border-bottom-width: 2px; border-radius: 4px; font: 13px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); white-space: nowrap; }
+    .layer-guide { margin-top: 26px; max-width: 900px; color: var(--muted); font-size: 15px; }
+    .layer-guide strong { color: var(--ink); }
+    .recording-steps { padding-left: 24px; max-width: 960px; }
+    .recording-steps li { padding-left: 8px; margin: 22px 0; color: var(--muted); }
+    .recording-steps strong { color: var(--ink); }
     .compat { padding-top: 18px; border-top: 1px solid var(--line); }
     .calibration { margin-top: 58px; }
     .clock-demo { max-width: 820px; margin: 28px 0; }
@@ -89,10 +102,12 @@
       nav { gap: 20px; }
       .hero { padding: 38px 0; }
       .lead { font-size: 18px; }
-      .workflow, .comparison { grid-template-columns: 1fr; gap: 24px; }
+      .workflow, .comparison, .shortcut-groups { grid-template-columns: 1fr; gap: 24px; }
       .section { padding: 38px 0; }
       .workflow { padding-bottom: 12px; }
       .setup { padding: 24px; }
+      .shortcut-group { padding: 20px; }
+      .shortcuts > div { grid-template-columns: 110px 1fr; gap: 12px; }
     }
   </style>
 </head>
@@ -104,7 +119,9 @@
       <nav aria-label="Main navigation">
         <a href="#workflow">Workflow</a>
         <a href="#motion">Zoom &amp; pan</a>
+        <a href="#shortcuts">Shortcuts</a>
         <a href="#start">Setup</a>
+        <a href="#recording">Recording</a>
         <a href="https://github.com/santismo/CamOrder">GitHub</a>
       </nav>
     </header>
@@ -184,6 +201,38 @@
         </div>
         <p class="note">Both finished movies are real recordings made with CamOrder. These web copies preserve the original edits and sound.</p>
       </section>
+      <section class="section" id="shortcuts" aria-labelledby="shortcuts-title">
+        <div class="eyebrow">Keep your hands on the edit</div>
+        <h2 id="shortcuts-title">Select a shot. Make your move.</h2>
+        <p class="lead">Cut several camera angles together, choose which shot sits in front, and save without breaking your flow.</p>
+        <p class="note">Click inside CamOrder’s editor to use these editing shortcuts. While typing a name or value, keys stay in that field; press Return or click outside a lane name to finish editing it. ⌘ means Command; ⇧ means Shift; ⌥ means Option.</p>
+        <div class="shortcut-groups">
+          <div class="shortcut-group">
+            <h3>Select, cut &amp; trim</h3>
+            <dl class="shortcuts">
+              <div><dt><kbd>Shift</kbd> + click</dt><dd>Add or remove a region from the selection.</dd></div>
+              <div><dt><kbd aria-label="Command A">⌘ A</kbd></dt><dd>Select all video regions.</dd></div>
+              <div><dt><kbd>T</kbd></dt><dd>Split selected regions that cross the playhead. The scissors button does the same.</dd></div>
+              <div><dt>Drag an edge</dt><dd>Trim a region’s start or end. Select several regions first to trim their matching edges together.</dd></div>
+              <div><dt><kbd>Option</kbd> + drag</dt><dd>Temporarily bypass beat snapping for a move or trim.</dd></div>
+              <div><dt><kbd aria-label="Command C">⌘ C</kbd> / <kbd aria-label="Command V">⌘ V</kbd></dt><dd>Copy selected regions, then paste at the playhead in the same CamOrder project. Groups keep their spacing and lanes.</dd></div>
+            </dl>
+          </div>
+          <div class="shortcut-group">
+            <h3>Layer, animate &amp; save</h3>
+            <dl class="shortcuts">
+              <div><dt><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></dt><dd>Assign selected regions to foreground, middle or background. Lower numbers sit in front.</dd></div>
+              <div><dt><kbd>4</kbd>–<kbd>9</kbd> / <kbd>0</kbd></dt><dd>Add deeper layers, or use 0 for automatic lane order behind numbered layers.</dd></div>
+              <div><dt><kbd>M</kbd></dt><dd>Add a framing automation marker to the selected region at the playhead.</dd></div>
+              <div><dt><kbd>Delete</kbd></dt><dd>Remove selected regions from the timeline.</dd></div>
+              <div><dt><kbd aria-label="Command Z">⌘ Z</kbd> / <kbd aria-label="Command Shift Z">⌘ ⇧ Z</kbd></dt><dd>Undo / redo, including region deletion while a lane is armed.</dd></div>
+              <div><dt><kbd aria-label="Command S">⌘ S</kbd></dt><dd>Save the CamOrder project. The Save button does the same; edits also save automatically.</dd></div>
+            </dl>
+          </div>
+        </div>
+        <p class="layer-guide"><strong>Selection is for editing; layer numbers set the picture.</strong> The numbered badge and colored border show a region’s output layer. A yellow outline shows what you’ve selected. Resize or move a foreground shot to reveal other videos behind it. You can also assign layers with the <strong>Output Layer</strong> control.</p>
+        <p class="note">Turn on <strong>Snap</strong> and choose a beat or subdivision for cuts, moves and trims that follow Logic’s detected tempo. Shift-click your camera regions, position the playhead, then press T to cut them together. Pinch the timeline to zoom. Save your Logic project separately too.</p>
+      </section>
       <section class="setup" id="start" aria-labelledby="setup-title">
         <div class="eyebrow">Get started</div>
         <h2 id="setup-title">Add CamOrder to your Logic session.</h2>
@@ -191,12 +240,26 @@
         <ol>
           <li><a href="https://github.com/santismo/CamOrder/releases/latest/download/CamOrder-Studio-Intel.dmg">Download the DMG</a> and open it. Double-click <strong>Install CamOrder Studio.pkg</strong> and follow the installer; it chooses the plug-in folder for you. Fully quit and reopen Logic after installing.</li>
           <li>On <strong>Stereo Out</strong>, choose <strong>Audio FX → Audio Units → Santismo → CamOrder Studio → Stereo</strong>.</li>
-          <li>Create a CamOrder project, choose a Default input, allow camera or screen access, and arm a video lane. Press <strong>Play or Record in Logic</strong>. Arm a Logic audio track too when recording audio.</li>
-          <li>Stop to finish the take and disarm the video lanes. Edit, export, then import the movie into Logic and position it at the start shown in the accompanying placement note.</li>
+          <li>Open the project menu beside <strong>CamOrder</strong>, choose <strong>New Project…</strong>, and save the CamOrder project alongside your Logic project. Keep the whole <strong>.camorderstudio</strong> folder when moving or sharing it; it contains the video media.</li>
         </ol>
+        <p>Then follow the <a href="#recording">recording steps below</a> to choose cameras and start a take.</p>
         <p>No MIDI or timecode-audio routing is needed for normal Stereo Out operation. Audio passes through unchanged; recorded takes are video-only. Import a bounced master if you want audio in the exported movie.</p>
         <p><a href="https://github.com/santismo/CamOrder/releases/latest/download/CamOrder-Studio-Installer-Intel.pkg">Direct installer download</a> · <a href="https://github.com/santismo/CamOrder/releases/latest">ZIP alternative &amp; release notes</a></p>
         <p class="compat"><strong>Intel Mac · macOS 13+.</strong> Development build; the installer is unsigned and not notarized. macOS may require approval in <strong>System Settings → Privacy &amp; Security</strong> after you first open it. Follow <a href="https://support.apple.com/102445">Apple’s instructions</a> only if you trust the download. Apple silicon source builds have not been validated. See the <a href="https://github.com/santismo/CamOrder/blob/main/CamOrderStudio/README-AU.md">user guide</a> for compatibility and permissions.</p>
+      </section>
+      <section class="section calibration" id="recording" aria-labelledby="recording-title">
+        <div class="eyebrow">Two kinds of arming, one session</div>
+        <h2 id="recording-title">Record your music and your cameras.</h2>
+        <p class="lead">Logic’s armed tracks capture the audio. CamOrder’s armed lanes capture the video. Set them up once for each take, then work from Logic’s timeline.</p>
+        <ol class="recording-steps">
+          <li><strong>Choose your camera inputs.</strong> In CamOrder’s Live Inputs, select a <strong>Default</strong> camera or screen source and allow access when macOS asks. Every lane starts with that input. For multiple angles, choose a different camera in each lane’s input menu. Wait for the live previews before starting.</li>
+          <li><strong>Arm the video lanes you want to capture.</strong> Click <strong>Arm</strong> on each CamOrder lane for this take. Arming a Logic audio track does not arm a CamOrder lane.</li>
+          <li><strong>Choose what Logic should do.</strong> To record a new performance, also record-enable the relevant audio tracks in Logic, position Logic’s playhead, and press <strong>Record</strong>. To film along with music already in the project, leave those audio tracks unarmed and press <strong>Play</strong>. Armed CamOrder lanes record video in either case.</li>
+          <li><strong>Stay in the music.</strong> With CamOrder on Stereo Out, you can work in Logic’s timeline or close the plug-in editor during a take. When the editor is active, <kbd>R</kbd> forwards Logic’s R key command and <kbd>Space</kbd> controls Play/Stop. CamOrder’s red Record and Play buttons also control Logic. If you’ve customized Logic’s key commands, use its transport controls.</li>
+          <li><strong>Stop, review and rearm.</strong> Stop Logic to finish the video take. CamOrder automatically disarms its lanes; arm them again for the next take. Leave them disarmed when you only want to watch and edit existing footage. If a take remains active after Logic stops, use <strong>Stop Take</strong> in CamOrder.</li>
+          <li><strong>Save and export.</strong> Save CamOrder with <kbd aria-label="Command S">⌘ S</kbd> or <strong>Save</strong>, and save your Logic project too. Edit the regions, export the movie, and import it into Logic’s movie lane at the start specified in the export’s placement note.</li>
+        </ol>
+        <p class="note">For the next camera take, start with Logic stopped and its playhead at the intended position. Automatic repeated cycle takes are not supported. Use the <a href="#camera-sync">camera sync guide below</a> to measure and correct a consistent camera delay.</p>
       </section>
       <section class="section calibration" id="camera-sync" aria-labelledby="sync-title">
         <div class="eyebrow">Fine-tune your camera sync</div>

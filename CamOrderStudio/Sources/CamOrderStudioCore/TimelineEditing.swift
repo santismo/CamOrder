@@ -1,16 +1,39 @@
 import Foundation
 
 extension Timeline {
-    /// Lane order is compositing order; selection is only an editing concern.
-    public func visibleClip(at seconds: Double) -> VideoClip? {
-        guard seconds.isFinite else { return nil }
-        for lane in lanes where !lane.isMuted {
-            if let clip = lane.clips.last(where: {
-                $0.isEnabled && seconds >= $0.timelineStartSeconds && seconds < $0.timelineStartSeconds + $0.durationSeconds
-            }) { return clip }
+    /// Numbered layers precede automatic lane order. The most recent assignment
+    /// breaks ties, then lane order and the last overlapping take in that lane.
+    public func visibleClips(at seconds: Double) -> [VideoClip] { orderedClips(at: seconds) { _ in 0 } }
+
+    fileprivate func orderedClips(at seconds: Double, offset: (String) -> Double) -> [VideoClip] {
+        guard seconds.isFinite else { return [] }
+        var candidates: [(clip: VideoClip, lane: Int, index: Int)] = []
+        for (index, lane) in lanes.enumerated() where !lane.isMuted {
+            let shift = offset(lane.id), local = seconds - shift
+            for (clipIndex, clip) in lane.clips.enumerated() where clip.isEnabled
+                && local >= clip.timelineStartSeconds && local < clip.timelineStartSeconds + clip.durationSeconds {
+                var presented = clip; presented.timelineStartSeconds += shift
+                candidates.append((presented, index, clipIndex))
+            }
         }
-        return nil
+        let ordered = candidates.sorted {
+            let left = $0.clip.compositingLayer ?? 10, right = $1.clip.compositingLayer ?? 10
+            if left != right { return left < right }
+            let leftOrder = $0.clip.compositingLayer == nil ? 0 : ($0.clip.layerAssignmentOrder ?? 0)
+            let rightOrder = $1.clip.compositingLayer == nil ? 0 : ($1.clip.layerAssignmentOrder ?? 0)
+            if leftOrder != rightOrder { return leftOrder > rightOrder }
+            return $0.lane == $1.lane ? $0.index > $1.index : $0.lane < $1.lane
+        }
+        var occupied: [Int: Set<Int>] = [:]
+        return ordered.compactMap { entry in
+            let layer = entry.clip.compositingLayer ?? 10
+            guard occupied[entry.lane, default: []].insert(layer).inserted else { return nil }
+            return entry.clip
+        }
     }
+
+    public func visibleClip(at seconds: Double) -> VideoClip? { visibleClips(at: seconds).first }
+
 }
 
 extension VideoClip {
@@ -111,15 +134,9 @@ extension CamOrderProject {
         return result
     }
 
-    /// One active region per visible lane, ordered front to back.
+    /// Shared by Main Stage and movie export, including per-lane sync offsets.
     public func playbackClips(at seconds: Double) -> [VideoClip] {
-        guard seconds.isFinite else { return [] }
-        return timeline.lanes.filter { !$0.isMuted }.compactMap { lane in
-            let local = seconds - videoOffsetSeconds(forLane: lane.id)
-            return lane.clips.last(where: {
-                $0.isEnabled && local >= $0.timelineStartSeconds && local < $0.timelineStartSeconds + $0.durationSeconds
-            }).map { presentedClip($0, laneID: lane.id) }
-        }
+        timeline.orderedClips(at: seconds) { videoOffsetSeconds(forLane: $0) }
     }
 
     public func playbackClip(at seconds: Double) -> VideoClip? { playbackClips(at: seconds).first }

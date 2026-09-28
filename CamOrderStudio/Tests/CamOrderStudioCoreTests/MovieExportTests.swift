@@ -124,6 +124,33 @@ final class MovieExportTests: XCTestCase {
     }
 
     @MainActor
+    func testNumberedForegroundOverridesUpperLaneInExport() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try await makeMovie(at: folder.appendingPathComponent("red.mov"), red: true)
+        try await makeMovie(at: folder.appendingPathComponent("blue.mov"), red: false)
+        var project = CamOrderProject.empty(name: "Numbered layers")
+        project.exportSettings.canvasWidth = 64; project.exportSettings.canvasHeight = 64
+        project.exportSettings.audioMode = .muteAll
+        let red = VideoClip(clipId: "upper", mediaAssetId: "r", videoFile: "red.mov", armedLaneId: "upper",
+            logicStartTimecode: .from(seconds: 0, frameRate: .fps30), logicStartSeconds: 0, durationSeconds: 1, frameRate: .fps30,
+            compositingLayer: 3)
+        let blue = VideoClip(clipId: "lower", mediaAssetId: "b", videoFile: "blue.mov", armedLaneId: "lower",
+            logicStartTimecode: .from(seconds: 0, frameRate: .fps30), logicStartSeconds: 0, durationSeconds: 1, frameRate: .fps30,
+            framing: ClipFraming(zoom: 0.5), compositingLayer: 1)
+        project.media = [MediaAsset(id: "r", kind: .video, displayName: "Red", relativePath: "red.mov"), MediaAsset(id: "b", kind: .video, displayName: "Blue", relativePath: "blue.mov")]
+        project.timeline.lanes = [VideoLane(id: "upper", name: "Upper", clips: [red], videoOffsetMS: -10), VideoLane(id: "lower", name: "Lower", clips: [blue], videoOffsetMS: 20)]
+        project.sync.videoOffsetMS = -5
+        XCTAssertEqual(project.playbackClips(at: 0.2).map(\.id), [blue.id, red.id])
+        let output = folder.appendingPathComponent("foreground.mov")
+        try await RenderExportEngine().export(project: project, from: folder, to: output)
+        let movie = AVURLAsset(url: output)
+        XCTAssertGreaterThan(try pixel(movie, at: 0.2).blue, 0.8, "Numbered foreground beats physical lane order")
+        XCTAssertGreaterThan(try pixel(movie, at: 0.2, x: 4).red, 0.8, "Background still shows around a smaller foreground")
+    }
+
+    @MainActor
     func testDifferentLaneOffsetsCombineWithMasterInLayeredExport() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

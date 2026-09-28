@@ -16,7 +16,7 @@ struct COBridge {
     std::atomic<uint64_t> sequence{0}, revision{0}, renderCount{0}, callbackFailures{0};
     std::atomic<double> lastAttemptSeconds{0};
     std::atomic<int32_t> callbackStatus{0};
-    std::atomic<uint32_t> callbackVersion{0};
+    std::atomic<uint32_t> callbackVersion{0}, musicalTimeValid{0};
     std::atomic<double> seconds{0}, tempo{120}, beat{0}, hostSeconds{0}, lastRenderSeconds{0};
     std::atomic<double> startSeconds{0}, startHostSeconds{0};
     std::atomic<uint32_t> frames{0}, playing{0}, recording{0}, valid{0};
@@ -43,7 +43,7 @@ bool COReadTransport(COBridge *b, COTransport *s) {
         s->recording = b->recording.load(); s->valid = b->valid.load();
         s->renderCount = b->renderCount.load(); s->callbackFailures = b->callbackFailures.load();
         s->lastAttemptSeconds = b->lastAttemptSeconds.load(); s->callbackStatus = b->callbackStatus.load();
-        s->callbackVersion = b->callbackVersion.load();
+        s->callbackVersion = b->callbackVersion.load(); s->musicalTimeValid = b->musicalTimeValid.load();
         if (sequence == b->sequence.load()) return true;
     }
     return false;
@@ -149,7 +149,8 @@ public:
             ++bridge->sequence;
             return; // Preserve the last good position; failure is not a Stop command.
         }
-        CallHostBeatAndTempo(&beat, &tempo);
+        const auto musicalResult = CallHostBeatAndTempo(&beat, &tempo);
+        bridge->musicalTimeValid = musicalResult == noErr && std::isfinite(beat) && std::isfinite(tempo) && tempo > 0;
         bridge->seconds = sample / GetSampleRate();
         bridge->tempo = tempo; bridge->beat = beat;
         bridge->hostSeconds = (time.mFlags & kAudioTimeStampHostTimeValid) && time.mHostTime != 0

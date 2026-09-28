@@ -190,7 +190,11 @@ final class PluginSession: NSObject {
             "activeTakes": store.pendingTakes.count]
         if store.hasArmedLane && now - lastDiagnosticTime >= 2 { logEvent("armed_transport_status", seconds: seconds); lastDiagnosticTime = now }
         if now - lastDisplayTime >= 1.0 / 30 {
-            sync.receiveHostPosition(seconds: seconds, playing: update.playing && !update.timingDelayed, tempo: snapshot.tempo,
+            if freshAU, snapshot.musicalTimeValid != 0 {
+                store.receiveHostGrid(seconds: snapshot.seconds, beat: snapshot.beat, tempo: snapshot.tempo)
+            }
+            sync.receiveHostPosition(seconds: seconds, playing: update.playing && !update.timingDelayed,
+                tempo: snapshot.musicalTimeValid != 0 ? snapshot.tempo : .nan,
                 available: available && !update.timingDelayed, sourceName: usingTimecode ? "CamOrder Logic Link" : "Logic Audio Unit transport")
             sync.setHostTimingDelayed(update.timingDelayed); lastDisplayTime = now
         }

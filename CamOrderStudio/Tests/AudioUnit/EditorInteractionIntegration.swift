@@ -22,6 +22,23 @@ func runRestoredSessionRegression() throws {
         RunLoop.main.run(until: Date().addingTimeInterval(1.0 / 60))
     }
     require(session.sync.isTransportRolling && session.sync.displaySeconds > 70.3)
+    COTestHostSetTempo(host, 88, 0.137, true)
+    for _ in 0..<4 {
+        require(COTestHostRender(host, 71, false, false) == 0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.04))
+    }
+    require(abs(session.store.tempoBPM - 88) < 0.00001 && abs(session.store.musicalGrid.originSeconds - 0.137) < 0.00001,
+        "Host tempo and beat phase drive editing even without an editor")
+    session.store.saveProject()
+    let saved = try ProjectDocument.open(at: folder)
+    require(saved.project.timeline.tempoBPM == 88 && abs(saved.project.timeline.gridOriginSeconds! - 0.137) < 0.00001)
+    COTestHostSetTempo(host, 999, 0, false)
+    for _ in 0..<4 {
+        require(COTestHostRender(host, 71, false, false) == 0)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.04))
+    }
+    require(session.store.tempoBPM == 88, "Missing beat callback must preserve the last real grid")
+    COTestHostSetTempo(host, 120, 0, true)
     // A stopped scrub yields as soon as the host starts; reopening shares the same session.
     session.sync.receiveHostPosition(seconds: 71, playing: false, tempo: 120, available: true)
     session.sync.preview(at: 12)
@@ -129,6 +146,87 @@ func runEditorInteractionRegression(view: NSView, window: NSWindow, session: Plu
     let saved = try ProjectDocument.open(at: store.document!.folderURL)
     require(saved.project.timeline == store.project.timeline, "Command-S saves the edited timeline")
     print("PASS: native left/right edge drags trim and restore footage with one-step Undo; Command-C/V/S copy, paste at playhead and save without cutting")
+    // Exercise Shift-click through native region bodies, then group gestures and
+    // T/number keys through the same AU responder used by the real editor.
+    var cameraRegions: [VideoClip] = []
+    for index in 0..<3 {
+        var region = fixture
+        region.id = UUID().uuidString; region.clipId = "Camera \(index + 1)"
+        region.armedLaneId = store.project.timeline.lanes[index].id
+        region.timelineStartSeconds = 4; region.trimInSeconds = 0; region.durationSeconds = 2
+        store.project.timeline.lanes[index].clips = [region]
+        cameraRegions.append(region)
+    }
+    store.selectedClipId = nil
+    session.sync.preview(at: 5)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+    func regionMouse(_ id: String, shift: Bool = false, drag: CGFloat = 0, leftEdge: Bool = false) {
+        view.layoutSubtreeIfNeeded()
+        let identifier = "\(leftEdge ? "trim-left" : "region-body")-\(id)"
+        guard let target = descendants(view).first(where: { $0.identifier?.rawValue == identifier }) else { fatalError("Missing \(identifier)") }
+        // The horizontal timeline sits inside a separate vertical lane scroller.
+        // Reveal the target through both ancestors, not just the nearest scroller.
+        var ancestor = target.superview
+        while let current = ancestor {
+            if let scroll = current as? NSScrollView, let documentView = scroll.documentView {
+                let rect = target.convert(target.bounds, to: documentView)
+                var origin = scroll.contentView.bounds.origin
+                if rect.minY < origin.y { origin.y = rect.minY }
+                if rect.maxY > origin.y + scroll.contentView.bounds.height { origin.y = rect.maxY - scroll.contentView.bounds.height }
+                scroll.contentView.scroll(to: origin); scroll.reflectScrolledClipView(scroll.contentView)
+            }
+            ancestor = current.superview
+        }
+        view.layoutSubtreeIfNeeded()
+        let point = target.convert(NSPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil)
+        let flags: NSEvent.ModifierFlags = shift ? .shift : []
+        for step in 0...4 {
+            if drag == 0 && step > 0 && step < 4 { continue }
+            let type: NSEvent.EventType = step == 0 ? .leftMouseDown : (step == 4 ? .leftMouseUp : .leftMouseDragged)
+            send(NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x + drag * CGFloat(min(step, 3)) / 3, y: point.y),
+                modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!)
+        }
+    }
+    for (index, region) in cameraRegions.enumerated() {
+        regionMouse(region.id, shift: index > 0)
+    }
+    require(store.selectedClipIDs == Set(cameraRegions.map(\.id)), "Shift-click must retain all three camera selections")
+    regionMouse(cameraRegions[1].id, shift: true)
+    require(store.selectedClipIDs.count == 2, "Shift-click a selected region removes only that region")
+    regionMouse(cameraRegions[1].id, shift: true)
+    regionMouse(cameraRegions[0].id, drag: 9)
+    require(store.selectedRegions().allSatisfy { abs($0.timelineStartSeconds - 4.5) < 0.001 }, "Native drag moves the whole selection on the beat")
+    store.undoProjectChange()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    regionMouse(cameraRegions[0].id, drag: 9, leftEdge: true)
+    require(store.selectedRegions().allSatisfy { abs($0.timelineStartSeconds - 4.5) < 0.001 && abs($0.trimInSeconds - 0.5) < 0.001 },
+        "Dragging one selected left edge trims all cameras together")
+    store.undoProjectChange()
+    func editKey(_ key: String, code: UInt16) {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: code)!
+        require(view.performKeyEquivalent(with: event), "AU must handle \(key)")
+    }
+    window.makeFirstResponder(view)
+    session.sync.preview(at: 5.08)
+    editKey("t", code: 17)
+    require(store.project.timeline.lanes.prefix(3).allSatisfy { $0.clips.count == 2 }, "T cuts every selected camera")
+    require(store.selectedRegions().count == 3 && store.selectedRegions().allSatisfy { abs($0.timelineStartSeconds - 5) < 0.001 }, "T uses the snapped common playhead")
+    editKey("3", code: 20)
+    require(store.selectedRegions().allSatisfy { $0.compositingLayer == 3 })
+    let foreground = store.project.timeline.lanes[2].clips.last!
+    store.selectRegion(foreground.id)
+    editKey("1", code: 18)
+    require(store.playbackClip(at: 5.5)?.id == foreground.id, "Number 1 puts the selected lower-lane region in front")
+    // Typing a digit into a lane name must remain text editing.
+    window.makeFirstResponder(name)
+    let typing = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, characters: "2", charactersIgnoringModifiers: "2", isARepeat: false, keyCode: 19)!
+    _ = view.performKeyEquivalent(with: typing)
+    require(store.clip(id: foreground.id)?.compositingLayer == 1, "Layer shortcuts never steal lane-name typing")
+    window.makeFirstResponder(view)
+    print("PASS: native Shift-click/toggle, grouped move and trim gestures, T multi-camera split, numbered foreground and text-field shortcut protection")
     // End the trim gesture's deliberate two-second manual-scroll grace period
     // before independently testing automatic transport following.
     scroller.manualUntil = 0

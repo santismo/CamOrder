@@ -2,7 +2,7 @@
 
 [← Current CamOrder Studio plug-in](../README.md)
 
-CamOrder's current focus is **CamOrder Studio AU 0.5.2**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.2) or read its [guide](../CamOrderStudio/README-AU.md).
+CamOrder's current focus is **CamOrder Studio AU 0.6.0**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.6.0) or read its [guide](../CamOrderStudio/README-AU.md).
 
 **Older versions are still available, but they are buggy, unsupported historical builds.** They may contain recording, transport, editing or export problems fixed in later versions. Keep a separate copy of your project before opening it with an older version. Their original instructions describe their behavior at the time and do not replace the current guide.
 
@@ -12,6 +12,7 @@ The [historical AU archive](https://github.com/santismo/CamOrder/releases/tag/le
 
 | Version | Development stage | Download |
 | --- | --- | --- |
+| 0.5.2 | Visible Save, draggable region edges and single-region copy/paste. Superseded by host-tempo snapping, grouped editing and explicit output layers. | [0.5.2 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.2) |
 | 0.5.1 | Built-in millisecond sync calculator. Superseded by visible Save, improved edge trimming and region copy/paste. | [0.5.1 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.1) |
 | 0.5.0 | Fixed export anchors and independent lane offsets, layered video, framing markers and one host transport. Superseded by the built-in sync calculator. | [0.5.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.0) |
 | 0.4.0 | Multiple camera inputs and shared defaults. Superseded: edited-timeline export could cancel sync offsets; single top-region playback and older editing/transport behavior. | [0.4.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.4.0) |

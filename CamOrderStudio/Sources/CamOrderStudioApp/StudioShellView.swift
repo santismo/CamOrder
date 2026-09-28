@@ -174,7 +174,7 @@ struct StudioShellView: View {
                     } else { monitors }
                 }.padding(.horizontal, 8)
                 HStack {
-                    Text("CamOrder · AU 0.5.2").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.6.0").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -205,9 +205,12 @@ struct StudioShellView: View {
             syncEngine.setTempoBPM(store.tempoBPM)
             store.framingPlayheadSeconds = { editPlayback.seconds(sync: syncEngine) }
         }
-        .onDisappear { if syncEngine.isHosted { syncEngine.followHost() }; editPlayback.pause() }
+        .onDisappear { store.cancelRegionEdit(); if syncEngine.isHosted { syncEngine.followHost() }; editPlayback.pause() }
         .onChange(of: store.tempoBPM) { bpm in
             syncEngine.setTempoBPM(bpm)
+        }
+        .onChange(of: syncEngine.detectedTempoBPM) { bpm in
+            if !syncEngine.isHosted, let bpm { store.receiveHostGrid(seconds: 0, beat: 0, tempo: bpm) }
         }
         .onChange(of: store.project.audio.masteredAudioFile) { _ in
             configureEditAudio()
@@ -845,7 +848,7 @@ private struct PlaybackPreviewPane: View {
                             Text("No video at playhead")
                                 .font(.caption)
                             if geometry.size.height >= 140 {
-                                Text("Visible lanes are layered here, with the top lane in front.")
+                                Text("Assign Output Layers to regions: 1 is foreground, followed by 2 and 3.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         }
@@ -1111,6 +1114,11 @@ private struct InspectorPane: View {
                 }
 
                 DisclosureGroup("Tempo Grid", isExpanded: $showTempoSection) {
+                    if store.hostGrid != nil {
+                        Label(String(format: "Following Logic · %.2f BPM", store.tempoBPM), systemImage: "metronome")
+                        Text("The grid follows the tempo and beat position at Logic’s current playhead. Move Logic to the section you are editing after a tempo change.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
                     HStack(spacing: 8) {
                         TextField("BPM", text: $tempoText)
                             .frame(width: 110)
@@ -1128,16 +1136,9 @@ private struct InspectorPane: View {
                             Image(systemName: "checkmark")
                         }
                         .help("Apply tempo")
-                        if let detectedTempo = syncEngine.detectedTempoBPM {
-                            Button {
-                                tempoText = String(format: "%.2f", detectedTempo)
-                                saveTempo()
-                            } label: {
-                                Label(String(format: "%.1f", detectedTempo), systemImage: "metronome")
-                            }
-                            .help("Use detected MIDI clock tempo")
-                        }
                     }
+                    }
+                    Toggle("Snap cuts and drags to grid", isOn: Binding(get: { store.snapToGrid }, set: store.setSnapToGrid))
                     Picker("Grid", selection: gridDivisionBinding) {
                         ForEach(BeatGridDivision.allCases, id: \.self) { division in
                             Text(division.displayName).tag(division)
@@ -1805,19 +1806,19 @@ private struct TimelineView: View {
                     }
                     .help("Insert automation marker at playhead")
                     .disabled(store.selectedClip() == nil)
-                    SymbolToolButton(systemImage: "scissors", help: "Cut at Playhead") {
+                    SymbolToolButton(systemImage: "scissors", help: "Cut Selected Regions at Playhead (T)") {
                         store.cutSelectedClip(at: activePlayheadSeconds)
                     }
                     .disabled(store.selectedClip() == nil)
-                    SymbolToolButton(systemImage: "doc.on.doc", help: "Copy Region (⌘C)") {
+                    SymbolToolButton(systemImage: "doc.on.doc", help: "Copy Selected Regions (⌘C)") {
                         store.copySelectedRegion()
                     }
                     .disabled(store.selectedClip() == nil)
-                    SymbolToolButton(systemImage: "doc.on.clipboard", help: "Paste at Playhead on the Copied Region’s Lane (⌘V)") {
+                    SymbolToolButton(systemImage: "doc.on.clipboard", help: "Paste Regions at Playhead (⌘V)") {
                         store.pasteRegion(at: activePlayheadSeconds)
                     }
                     .disabled(!store.canPasteRegion)
-                    SymbolToolButton(systemImage: "trash", help: "Delete Region") {
+                    SymbolToolButton(systemImage: "trash", help: "Delete Selected Regions") {
                         store.deleteSelectedClip()
                     }
                     .disabled(store.selectedClip() == nil)
@@ -1838,6 +1839,23 @@ private struct TimelineView: View {
                     Color.black.opacity(0.12)
                 }
             }
+            HStack(spacing: 10) {
+                Toggle(isOn: Binding(get: { store.snapToGrid }, set: store.setSnapToGrid)) {
+                    Label("Snap", systemImage: "grid")
+                }.toggleStyle(.button).tint(.cyan)
+                Picker("Grid", selection: Binding(get: { store.gridDivision }, set: store.setGridDivision)) {
+                    ForEach(BeatGridDivision.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }.labelsHidden().frame(width: 105)
+                Text(String(format: "%@ %.1f BPM", store.hostGrid == nil ? "Grid" : "Logic", store.tempoBPM))
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Divider().frame(height: 16)
+                RegionLayerMenu().environmentObject(store)
+                Spacer(minLength: 0)
+                Text(store.selectedClipIDs.count > 1 ? "\(store.selectedClipIDs.count) selected" : "Shift-click to select multiple")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 12).padding(.bottom, 7)
             ScrollView(.vertical) {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1887,57 +1905,66 @@ private struct TimelineView: View {
                                                 clip: clip,
                                                 videoURL: videoURL(for: clip),
                                                 secondsToPixels: secondsToPixels,
-                                                isSelected: store.selectedClipId == clip.id,
-                                                sourceDuration: store.mediaAsset(for: clip)?.durationSeconds,
-                                                earliestStart: min(clip.timelineStartSeconds, max(0, clip.timelineStartSeconds - clip.trimInSeconds)),
-                                                onSelect: {
-                                                    store.selectedClipId = clip.id; store.selectedMediaAssetId = clip.mediaAssetId
+                                                isSelected: store.selectedClipIDs.contains(clip.id),
+                                                preview: store.regionEditPreview,
+                                                onSelect: { flags in
+                                                    store.selectRegion(clip.id, extending: flags.contains(.shift), preserveGroup: true)
                                                 },
+                                                onClick: { store.selectRegion(clip.id) },
                                                 onMarker: { seconds in
-                                                    store.selectedClipId = clip.id; store.selectedMediaAssetId = clip.mediaAssetId
+                                                    store.selectRegion(clip.id, preserveGroup: true)
                                                     seekTimelineIfEditing(locationX: CGFloat(seconds * secondsToPixels))
                                                 },
-                                                onMove: { startSeconds in
-                                                    store.updateClipStart(clip.id, startSeconds: startSeconds)
+                                                onBeginTrim: { store.selectRegion(clip.id, preserveGroup: true) },
+                                                onPreview: { kind, delta in
+                                                    store.previewRegionEdit(anchor: clip.id, kind: kind, translation: delta,
+                                                        bypassSnap: NSEvent.modifierFlags.contains(.option))
                                                 },
-                                                onResizeStart: { startSeconds in
-                                                    store.updateClipLeftEdge(clip.id, startSeconds: startSeconds)
-                                                },
-                                                onResizeEnd: { durationSeconds in
-                                                    store.updateClipDuration(clip.id, durationSeconds: durationSeconds)
+                                                onCommit: { kind, delta in
+                                                    store.commitRegionEdit(anchor: clip.id, kind: kind, translation: delta,
+                                                        bypassSnap: NSEvent.modifierFlags.contains(.option))
                                                 }
                                             )
                                                 .offset(x: clip.timelineStartSeconds * secondsToPixels)
-                                                .zIndex(store.selectedClipId == clip.id ? 1 : 0)
+                                                .zIndex(store.selectedClipIDs.contains(clip.id) ? 1 : 0)
                                                 .opacity(lane.isMuted ? 0.55 : 1)
-                                                .onTapGesture {
-                                                    store.selectedClipId = clip.id
-                                                    store.selectedMediaAssetId = clip.mediaAssetId
-                                                }
                                                 .contextMenu {
-                                                    Button("Copy Region") {
-                                                        store.selectedClipId = clip.id
+                                                    Button("Cut Selection at Playhead (T)") {
+                                                        store.selectRegion(clip.id, preserveGroup: true); store.cutSelectedClip(at: activePlayheadSeconds)
+                                                    }
+                                                    Menu("Output Layer") {
+                                                        ForEach(1...9, id: \.self) { number in
+                                                            Button(regionLayerName(number)) {
+                                                                store.selectRegion(clip.id, preserveGroup: true); store.setSelectedRegionLayer(number)
+                                                            }
+                                                        }
+                                                        Button("Automatic · Lane Order (0)") {
+                                                            store.selectRegion(clip.id, preserveGroup: true); store.setSelectedRegionLayer(nil)
+                                                        }
+                                                    }
+                                                    Button("Copy Selection") {
+                                                        store.selectRegion(clip.id, preserveGroup: true)
                                                         store.copySelectedRegion()
                                                     }
                                                     Button("Paste at Playhead on This Lane") { store.pasteRegion(at: activePlayheadSeconds, laneID: lane.id) }
                                                         .disabled(!store.canPasteRegion)
                                                     Divider()
                                                     Button("Snap Left Edge to Grid") {
-                                                        store.selectedClipId = clip.id; store.snapSelectedClipStartToGrid()
+                                                        store.selectRegion(clip.id, preserveGroup: true); store.snapSelectedClipStartToGrid()
                                                     }
                                                     Button("Snap Right Edge to Grid") {
-                                                        store.selectedClipId = clip.id; store.snapSelectedClipEndToGrid()
+                                                        store.selectRegion(clip.id, preserveGroup: true); store.snapSelectedClipEndToGrid()
                                                     }
                                                     Divider()
                                                     Button {
-                                                        store.selectedClipId = clip.id
+                                                        store.selectRegion(clip.id, preserveGroup: true)
                                                         store.selectedMediaAssetId = clip.mediaAssetId
                                                         store.insertAutomationMarker(at: activePlayheadSeconds)
                                                     } label: {
                                                         Label("Insert Automation Marker", systemImage: "flag.fill")
                                                     }
                                                     Button {
-                                                        store.selectedClipId = clip.id
+                                                        store.selectRegion(clip.id, preserveGroup: true)
                                                         store.selectedMediaAssetId = clip.mediaAssetId
                                                         store.deleteNearestAutomationMarker(at: activePlayheadSeconds)
                                                     } label: {
@@ -1945,7 +1972,7 @@ private struct TimelineView: View {
                                                     }
                                                     .disabled(clip.automationMarkers.isEmpty)
                                                     Button(role: .destructive) {
-                                                        store.selectedClipId = clip.id
+                                                        store.selectRegion(clip.id, preserveGroup: true)
                                                         store.clearSelectedClipAutomation()
                                                     } label: {
                                                         Label("Clear Automation Markers", systemImage: "eraser")
@@ -1953,7 +1980,7 @@ private struct TimelineView: View {
                                                     .disabled(clip.automationMarkers.isEmpty)
                                                     Divider()
                                                     Button(role: .destructive) {
-                                                        store.deleteClip(clip.id)
+                                                        store.selectRegion(clip.id, preserveGroup: true); store.deleteSelectedClip()
                                                     } label: {
                                                         Label("Delete Region", systemImage: "trash")
                                                     }
@@ -2031,7 +2058,7 @@ private struct TimelineView: View {
     }
 
     private func seekTimelineIfEditing(locationX: CGFloat) {
-        let seconds = max(0, Double(locationX) / max(1, secondsToPixels))
+        let seconds = store.snappedTime(max(0, Double(locationX) / max(1, secondsToPixels)), bypass: NSEvent.modifierFlags.contains(.option))
         if syncEngine.isHosted { syncEngine.preview(at: seconds) }
         else { editPlayback.isEditMode = true; editPlayback.seek(to: seconds, audioOffsetSeconds: store.project.audio.audioOffsetSeconds) }
     }
@@ -2087,7 +2114,8 @@ private struct TimelineView: View {
         let visibleDuration = max(120, Double(timelineWidth / max(1, CGFloat(secondsToPixels))))
         let step = labelStepSeconds
         let count = min(400, Int((visibleDuration / step).rounded(.up)) + 1)
-        return (0..<count).map { Double($0) * step }
+        let first = store.musicalGrid.firstTick(atOrAfter: 0, spacing: step)
+        return (0..<count).map { first + Double($0) * step }
     }
 
     private var labelStepSeconds: Double {
@@ -2103,15 +2131,21 @@ private struct TimelineView: View {
 
     private func isMajorGridLine(_ seconds: Double) -> Bool {
         let barSeconds = max(0.001, 60.0 / max(1, store.tempoBPM) * 4)
-        let barIndex = (seconds / barSeconds).rounded()
-        return abs(seconds - (barIndex * barSeconds)) < 0.01
+        let relative = seconds - store.musicalGrid.originSeconds
+        let barIndex = (relative / barSeconds).rounded()
+        return abs(relative - (barIndex * barSeconds)) < 0.001
     }
 
     private func drawGridLines(context: inout GraphicsContext, size: CGSize, height: CGFloat, includeMinorTicks: Bool) {
-        let maxLines = 1600
-        let lineCount = min(maxLines, Int((Double(size.width) / max(1, secondsToPixels)) / gridTickSeconds) + 1)
+        // Thin dense marks across the whole timeline instead of dropping every
+        // grid line after an arbitrary count on long recordings.
+        let duration = Double(size.width) / max(1, secondsToPixels)
+        let thinning = max(1, ceil(max(4 / (gridTickSeconds * secondsToPixels), duration / (gridTickSeconds * 12000))))
+        let step = gridTickSeconds * thinning
+        let first = store.musicalGrid.firstTick(atOrAfter: 0, spacing: step)
+        let lineCount = max(0, Int(ceil((duration - first) / step)))
         for index in 0...lineCount {
-            let seconds = Double(index) * gridTickSeconds
+            let seconds = first + Double(index) * step
             let x = CGFloat(seconds) * secondsToPixels
             let major = isMajorGridLine(seconds)
             let opacity = major ? 0.28 : 0.12
@@ -2398,20 +2432,22 @@ private struct ClipBlock: View {
     let videoURL: URL?
     let secondsToPixels: Double
     let isSelected: Bool
-    let sourceDuration: Double?
-    let earliestStart: Double
-    let onSelect: () -> Void
+    let preview: ProjectStore.RegionEditPreview?
+    let onSelect: (NSEvent.ModifierFlags) -> Void
+    let onClick: () -> Void
     let onMarker: (Double) -> Void
-    let onMove: (Double) -> Void
-    let onResizeStart: (Double) -> Void
-    let onResizeEnd: (Double) -> Void
-    @State private var previewMoveSeconds: Double = 0
-    @State private var previewLeftDeltaSeconds: Double = 0
-    @State private var previewRightDeltaSeconds: Double = 0
+    let onBeginTrim: () -> Void
+    let onPreview: (ProjectStore.RegionEditKind, Double) -> Void
+    let onCommit: (ProjectStore.RegionEditKind, Double) -> Void
+
+    private func delta(_ kind: ProjectStore.RegionEditKind) -> Double {
+        guard let preview, preview.ids.contains(clip.id), preview.kind == kind else { return 0 }
+        return preview.delta
+    }
 
     var body: some View {
-        let leftDelta = clampedLeftDelta(previewLeftDeltaSeconds)
-        let rightDelta = clampedRightDelta(previewRightDeltaSeconds, leftDelta: leftDelta)
+        let leftDelta = delta(.left)
+        let rightDelta = delta(.right)
         let previewDuration = max(min(0.1, clip.durationSeconds), clip.durationSeconds - leftDelta + rightDelta)
         let width = max(1, previewDuration * secondsToPixels)
         let leftGripOffset = width < 42 ? -min(12, max(0, (clip.timelineStartSeconds + leftDelta) * secondsToPixels)) : 0
@@ -2433,38 +2469,29 @@ private struct ClipBlock: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(clipOverlayColor(hasVideo: videoURL != nil))
             RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(isSelected ? Color.yellow : Color.clear, lineWidth: 3)
-            Rectangle()
-                .fill(Color.white.opacity(0.001))
-                .frame(width: width, height: 40)
-                .gesture(
-                    DragGesture(minimumDistance: 2, coordinateSpace: .global)
-                        .onChanged { value in
-                            onSelect()
-                            previewMoveSeconds = clampedMoveDelta(seconds(for: value.translation.width))
-                        }
-                        .onEnded { value in
-                            onMove(max(0, clip.timelineStartSeconds + clampedMoveDelta(seconds(for: value.translation.width))))
-                            previewMoveSeconds = 0
-                        }
-                )
-            .overlay {
-                VStack(spacing: 2) {
-                    Text(clip.clipId)
-                        .font(.caption2.bold())
-                    Text(formatTimelineSeconds(clip.timelineStartSeconds, frameRate: clip.frameRate, format: .logicTime))
-                        .font(.caption2.monospacedDigit())
-                }
-                .frame(maxWidth: max(0, width - 14))
-                .clipped()
-                .allowsHitTesting(false)
-                .lineLimit(1)
-                .foregroundStyle(.white)
-                .shadow(color: .black.opacity(0.28), radius: 1, x: 0, y: 1)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4)
-                .background(.black.opacity(videoURL == nil ? 0.14 : 0.44), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .strokeBorder(regionLayerColor(clip.compositingLayer).opacity(clip.compositingLayer == nil ? 0.25 : 1), lineWidth: 2)
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(isSelected ? Color.yellow : Color.clear, lineWidth: 2)
+                .padding(-3)
+            VStack(spacing: 2) {
+                Text(clip.compositingLayer.map { "L\($0) · \(clip.clipId)" } ?? clip.clipId)
+                    .font(.caption2.bold())
+                Text(formatTimelineSeconds(clip.timelineStartSeconds + delta(.move) + leftDelta, frameRate: clip.frameRate, format: .logicTime))
+                    .font(.caption2.monospacedDigit())
             }
+            .frame(maxWidth: max(0, width - 14))
+            .clipped()
+            .lineLimit(1)
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.28), radius: 1, x: 0, y: 1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(.black.opacity(videoURL == nil ? 0.14 : 0.44), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .allowsHitTesting(false)
+            RegionMoveHandle(clipID: clip.id, onSelect: onSelect, onClick: onClick,
+                onChange: { onPreview(.move, seconds(for: $0)) },
+                onEnd: { onCommit(.move, seconds(for: $0)) })
+                .frame(width: width, height: 40)
             ForEach(visibleAutomationMarkers) { marker in
                 automationMarkerView
                     .offset(x: markerX(for: marker, width: width) - width / 2)
@@ -2474,30 +2501,30 @@ private struct ClipBlock: View {
             }
         }
         .frame(width: width, height: 40)
+        .overlay(alignment: .topLeading) {
+            if let layer = clip.compositingLayer {
+                Text("\(layer)").font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.black).padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(regionLayerColor(layer), in: RoundedRectangle(cornerRadius: 3))
+                    .offset(x: 15, y: -5).allowsHitTesting(false)
+            }
+        }
         .overlay(alignment: .leading) {
-            RegionTrimHandle(clipID: clip.id, left: true, selected: isSelected, onSelect: onSelect,
-                onChange: { previewLeftDeltaSeconds = clampedLeftDelta(seconds(for: $0)) },
-                onEnd: { delta in
-                    onResizeStart(clip.timelineStartSeconds + clampedLeftDelta(seconds(for: delta)))
-                    previewLeftDeltaSeconds = 0
-                })
-                .frame(width: 14, height: 40)
-                .offset(x: leftGripOffset)
+            RegionTrimHandle(clipID: clip.id, left: true, selected: isSelected, onSelect: onBeginTrim,
+                onChange: { onPreview(.left, seconds(for: $0)) },
+                onEnd: { onCommit(.left, seconds(for: $0)) })
+                .frame(width: 14, height: 40).offset(x: leftGripOffset)
         }
         .overlay(alignment: .trailing) {
-            RegionTrimHandle(clipID: clip.id, left: false, selected: isSelected, onSelect: onSelect,
-                onChange: { previewRightDeltaSeconds = clampedRightDelta(seconds(for: $0), leftDelta: 0) },
-                onEnd: { delta in
-                    onResizeEnd(clip.durationSeconds + clampedRightDelta(seconds(for: delta), leftDelta: 0))
-                    previewRightDeltaSeconds = 0
-                })
-                .frame(width: 14, height: 40)
-                .offset(x: rightGripOffset)
+            RegionTrimHandle(clipID: clip.id, left: false, selected: isSelected, onSelect: onBeginTrim,
+                onChange: { onPreview(.right, seconds(for: $0)) },
+                onEnd: { onCommit(.right, seconds(for: $0)) })
+                .frame(width: 14, height: 40).offset(x: rightGripOffset)
         }
         // Keep exterior grips inside the parent hit-test bounds without changing
         // the region's actual timeline width or source time.
         .padding(.horizontal, 28)
-        .offset(x: (previewMoveSeconds + leftDelta) * secondsToPixels - 28)
+        .offset(x: (delta(.move) + leftDelta) * secondsToPixels - 28)
     }
 
     private var visibleAutomationMarkers: [ClipAutomationMarker] {
@@ -2541,20 +2568,7 @@ private struct ClipBlock: View {
         Double(translationWidth) / max(1, secondsToPixels)
     }
 
-    private func clampedMoveDelta(_ seconds: Double) -> Double {
-        max(-clip.timelineStartSeconds, seconds)
-    }
 
-    private func clampedLeftDelta(_ seconds: Double) -> Double {
-        min(max(seconds, earliestStart - clip.timelineStartSeconds), max(0, clip.durationSeconds - 0.1))
-    }
-
-    private func clampedRightDelta(_ seconds: Double, leftDelta: Double) -> Double {
-        let minimum = min(0.1, clip.durationSeconds)
-        let available = (sourceDuration ?? clip.trimOutSeconds).map { max(0, $0 - clip.trimInSeconds - (clip.playbackSyncOffsetSeconds ?? 0)) }
-        let maximumDelta = available.map { $0 - clip.durationSeconds } ?? Double.infinity
-        return min(maximumDelta, max(seconds, -clip.durationSeconds + leftDelta + minimum))
-    }
 }
 
 private struct TimelineClipFilmstripView: NSViewRepresentable {

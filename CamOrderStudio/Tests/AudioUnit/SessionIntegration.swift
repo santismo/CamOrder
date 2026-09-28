@@ -80,8 +80,13 @@ private final class KeyboardHostView: NSView {
 }
 
 // macOS may deny activation to a command-line test process. Supply the editor's
-// focus state locally; shortcut tests dispatch to its native key-equivalent hook
-// and never depend on stealing keyboard focus from the user's foreground app.
+// application/window focus state locally. Mouse events target only owned windows;
+// shortcuts use the native key-equivalent hook. Neither test needs to steal the
+// user's real foreground focus or claims to drive a live Logic session.
+private final class FocusedTestApplication: NSApplication {
+    override var isActive: Bool { true }
+}
+
 private final class FocusedEditorTestWindow: NSWindow {
     override var isKeyWindow: Bool { true }
 }
@@ -94,7 +99,7 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String = "Integrat
 struct SessionIntegration {
     @MainActor static func main() throws {
         setbuf(stdout, nil)
-        NSApplication.shared.setActivationPolicy(.accessory)
+        FocusedTestApplication.shared.setActivationPolicy(.accessory)
         let host = COTestHostCreate()!
         let bridge = COTestHostBridge(host)!
         let capture = SyntheticCamera()
@@ -210,6 +215,7 @@ struct SessionIntegration {
         print("PASS: R and Space keyboard handoff reaches the host responder exactly once")
         try runEditingRegression()
         try runRegionClipboardRegression()
+        try runMusicalRegionEditingRegression()
         try runSyncCalculatorRegression()
         // Visual fixture: actual recorded media and a 4K canvas in the small editor.
         session.store.unarmAllLanes()
@@ -234,6 +240,10 @@ struct SessionIntegration {
                 return nil
             }
             if let playerView = findPlayer(view), let stageClip = session.store.playbackClip(at: session.sync.displaySeconds) {
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+                view.layoutSubtreeIfNeeded()
                 let origin = playerView.convert(NSPoint(x: playerView.bounds.midX, y: playerView.bounds.midY), to: nil)
                 func mouse(_ type: NSEvent.EventType, dx: CGFloat) {
                     let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: origin.x + dx, y: origin.y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!
@@ -289,7 +299,7 @@ struct SessionIntegration {
             window.setContentSize(NSSize(width: 1280, height: 820))
             view.setFrameSize(NSSize(width: 1280, height: 820))
             window.center()
-            window.title = "CamOrder Studio 0.5.2"
+            window.title = "CamOrder Studio 0.6.0"
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             view.layoutSubtreeIfNeeded()
             let fullScreenshot = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("editor-full-session.png")

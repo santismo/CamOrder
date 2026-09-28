@@ -1,24 +1,28 @@
 # CamOrder Studio
 
-**Record and edit video inside Logic Pro. One Audio FX plug-in on Stereo Out.**
+**A video editor inside Logic Pro.**
 
-CamOrder Studio follows Logic's transport, records cameras or your screen into video lanes, and lets you trim, frame and export a movie from the same session. Your audio passes through unchanged.
+Record your cameras or screen, cut to your music, animate your shots, and export a finished movie from the same Logic session. CamOrder Studio gives you video lanes, editing to Logic’s detected tempo, and a Main Stage for framing and layering your shots.
 
-[Download CamOrder Studio AU 0.6.0](https://github.com/santismo/CamOrder/releases/tag/au-v0.6.0) · [User guide](CamOrderStudio/README-AU.md) · [Application & plug-in history](docs/HISTORY.md)
+[Download for Mac (DMG)](https://github.com/santismo/CamOrder/releases/latest/download/CamOrder-Studio-Intel.dmg) · [Watch real sessions](https://santismo.github.io/CamOrder/) · [User guide](CamOrderStudio/README-AU.md) · [Application & plug-in history](docs/HISTORY.md)
 
-> **Development build:** the download is for **Intel Macs, macOS 13+**, and is locally signed, not notarized. Apple silicon builds can be made from source but are not included or validated in this release. Physical camera combinations and real-session sync need checking on your setup.
+> **Development build:** the download is for **Intel Macs, macOS 13+**, with an unsigned, non-notarized installer and a locally signed plug-in. Apple silicon builds can be made from source but are not included or validated in this release. Physical camera combinations and real-session sync need checking on your setup.
 
-![CamOrder Studio's dark editor with Main Stage, four input tiles and video lanes](docs/images/camorder-studio-au.png)
+[![A real performance project in CamOrder, with recorded video and edited bass, guitar and drums lanes](docs/images/loop-idea-editor.png)](https://santismo.github.io/CamOrder/#workflow)
 
-*Actual 0.6.0 editor in a native Audio Unit test host, using simulated cameras and test footage. Logic supplies its own surrounding window controls.*
+*The actual CamOrder editor, opened with a real saved performance project in a separate preview window. [Watch the finished movies, see the Logic project, and compare zoom/pan automation with its exported result](https://santismo.github.io/CamOrder/).*
 
 ## Start recording in Logic
 
-1. Download and unzip the release, then run **Install CamOrder Studio.command**. Fully quit and reopen Logic after an update.
+CamOrder runs as an Audio Unit effect. Use one instance on Stereo Out for the whole video project; your audio passes through unchanged.
+
+1. Download and open the **DMG**, then double-click **Install CamOrder Studio.pkg**. Follow the installer; it chooses your account’s Audio Unit folder automatically. Fully quit and reopen Logic afterward. A [direct PKG](https://github.com/santismo/CamOrder/releases/latest/download/CamOrder-Studio-Installer-Intel.pkg) and [ZIP alternative](https://github.com/santismo/CamOrder/releases/latest) are also available.
 2. On **Stereo Out**, insert **Audio FX → Audio Units → Santismo → CamOrder Studio → Stereo**. Use one instance for the project.
 3. Create a CamOrder project beside your Logic project and choose the **Default** source under **Live Inputs**. Allow camera or screen access for the included **CamOrder Capture** helper.
 4. **Arm** a CamOrder lane, then press **Play or Record in Logic**. Also arm a Logic audio track when recording audio. Video keeps recording while you work in Logic's timeline or close the plug-in editor.
 5. Stop Logic to finish the take and automatically disarm the video lanes. Arm them again for another take. Edit your regions and **Export** a MOV or MP4.
+
+The installer is unsigned and not notarized. macOS may require approval in **System Settings → Privacy & Security** after opening it; follow [Apple’s instructions](https://support.apple.com/102445) only if you trust the download.
 
 Normal Stereo Out operation uses Logic's Audio Unit transport: no MIDI, MTC or timecode-audio routing is required. See the [guide](CamOrderStudio/README-AU.md) for permissions, transport fallback and troubleshooting.
 
@@ -43,6 +47,8 @@ Webcams, macOS-exposed iPhone/Continuity Camera inputs, and main-display screen 
 
 Camera takes contain video only. Import a bounced master if you want audio in the exported movie; the plug-in does not capture Logic's mix.
 
+For a clock-based camera calibration walkthrough, see [Measure the delay. Dial it in.](https://santismo.github.io/CamOrder/#camera-sync).
+
 ## Build and verify
 
 Requires Xcode and its command-line tools. Apple's AudioUnitSDK is included with its license and pinned revision.
@@ -56,6 +62,8 @@ Scripts/test-session.sh
 Scripts/install-au.sh
 auval -v aufx CmSt Sntm
 ```
+
+To build the DMG and native installer from the verified component, run `python3 Scripts/package-installer.py`. See [installer packaging and verification](docs/INSTALLER.md).
 
 Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.6.0.md) for the tests and their limits.
 

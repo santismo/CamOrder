@@ -4,12 +4,14 @@ CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **o
 
 ## Install and record
 
-1. Run `Install CamOrder Studio.command`. Fully quit and reopen Logic Pro after an update so it loads the new binary.
+1. Open the downloaded **DMG**, double-click **Install CamOrder Studio.pkg**, and follow the standard Mac installer. It installs the AU and capture helper in your account’s plug-in folder. A direct PKG download is also available; the ZIP retains `Install CamOrder Studio.command` as an alternative. Fully quit and reopen Logic Pro afterward so it loads the new binary.
 2. On **Stereo Out**, choose **Audio FX → Audio Units → Santismo → CamOrder Studio → Stereo**. If missing, rescan CamOrder Studio in Logic’s Plug-in Manager.
 3. Open the project menu beside **CamOrder**, choose **New Project…**, and save a `.camorderstudio` folder alongside your Logic project. Keep that whole folder when moving or sharing the project; it contains the media.
 4. Choose the shared **Default** source under **Live Inputs**. Every lane initially uses that input, and its preview starts automatically. Use the input menu on an individual lane to assign a different camera or screen source. Allow camera or screen access for the included **CamOrder Capture** helper when macOS asks. Permissions can be changed in System Settings → Privacy & Security.
 5. Wait for the live image(s), **Arm** one or more CamOrder lanes, and press **Play or Record in Logic**. For audio recording, also arm the relevant Logic audio track. You can work in Logic’s timeline or close the plug-in editor; the video session stays active.
 6. Stop Logic to finalize the take. CamOrder automatically disarms the lanes when Stop is confirmed. Arm the desired lanes again for the next take. **Disarm** cancels pre-roll; **Stop Take** finalizes and disarms.
+
+The installer is unsigned and not notarized. If macOS blocks it after you try to open it, follow [Apple’s instructions](https://support.apple.com/102445) in **System Settings → Privacy & Security** only if you trust the download. The native installer replaces the previous plug-in bundle; the ZIP’s command installer separately retains its existing backup behavior. Project folders and recordings are not part of either installation.
 
 Arming buffers video before transport starts so the beginning of the take can be retained. Different assigned inputs record simultaneously. Lanes sharing one camera use one capture connection and movie file, with a separate timeline region for each armed lane. Missing transport callbacks do not cut off capture or let the CamOrder playhead run indefinitely: the displayed clock holds its last confirmed position. If Logic stops without sending a stop report, use **Stop Take**. A backward transport move or manual Stop Take disarms the lane. Automatic repeated cycle takes are not supported.
 

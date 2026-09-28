@@ -79,6 +79,13 @@ private final class KeyboardHostView: NSView {
     override func keyDown(with event: NSEvent) { keys.append(event.keyCode) }
 }
 
+// macOS may deny activation to a command-line test process. Supply the editor's
+// focus state locally; shortcut tests dispatch to its native key-equivalent hook
+// and never depend on stealing keyboard focus from the user's foreground app.
+private final class FocusedEditorTestWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+}
+
 func require(_ condition: @autoclosure () -> Bool, _ message: String = "Integration check failed", file: StaticString = #file, line: UInt = #line) {
     if !condition() { fatalError(message, file: file, line: line) }
 }
@@ -202,6 +209,7 @@ struct SessionIntegration {
         require(hostView.keys == [15,49], "R and Space are delivered exactly once to the host responder")
         print("PASS: R and Space keyboard handoff reaches the host responder exactly once")
         try runEditingRegression()
+        try runRegionClipboardRegression()
         try runSyncCalculatorRegression()
         // Visual fixture: actual recorded media and a 4K canvas in the small editor.
         session.store.unarmAllLanes()
@@ -212,7 +220,7 @@ struct SessionIntegration {
         RunLoop.main.run(until: Date().addingTimeInterval(0.15))
         if CommandLine.arguments.count > 1 {
             let view = Unmanaged<NSView>.fromOpaque(createCamOrderView(bridge)).takeRetainedValue()
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 520), styleMask: [.titled,.resizable], backing: .buffered, defer: false)
+            let window = FocusedEditorTestWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 520), styleMask: [.titled,.resizable], backing: .buffered, defer: false)
             window.contentView = view; window.setContentSize(NSSize(width: 820, height: 520)); view.setFrameSize(NSSize(width: 820,height: 520)); window.orderFront(nil)
             RunLoop.main.run(until: Date().addingTimeInterval(0.7)); view.layoutSubtreeIfNeeded()
             if let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -257,6 +265,10 @@ struct SessionIntegration {
             // coordinates stay stable while the window's bottom edge moves.
             // Disable AppKit's overlapping native corner tracker in this harness
             // so the click specifically reaches CamOrder's SwiftUI resize grip.
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.15))
             window.styleMask.remove(.resizable)
             let beforeResize = view.bounds.size
             let grip = NSPoint(x: view.bounds.maxX - 12, y: view.isFlipped ? view.bounds.maxY - 9 : 9)
@@ -271,13 +283,13 @@ struct SessionIntegration {
             gripMouse(.leftMouseDown, fraction: 0)
             for step in 1...10 { gripMouse(.leftMouseDragged, fraction: CGFloat(step) / 10) }
             gripMouse(.leftMouseUp, fraction: 1)
-            require(abs(view.bounds.width - beforeResize.width - 73) < 2 && abs(view.bounds.height - beforeResize.height - 37) < 2, "Window grip must resize continuously in both dimensions; got \(view.bounds.size)")
+            require(abs(view.bounds.width - beforeResize.width - 73) < 2 && abs(view.bounds.height - beforeResize.height - 37) < 2, "Window grip must resize continuously in both dimensions; got \(view.bounds.size), active \(NSApp.isActive), key \(window.isKeyWindow), resizable \(window.styleMask.contains(.resizable)), grip \(grip)")
             print("PASS: actual bottom-right window grip freely resizes the editor in both dimensions")
             window.styleMask.insert(.resizable)
             window.setContentSize(NSSize(width: 1280, height: 820))
             view.setFrameSize(NSSize(width: 1280, height: 820))
             window.center()
-            window.title = "CamOrder Studio 0.5.1"
+            window.title = "CamOrder Studio 0.5.2"
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             view.layoutSubtreeIfNeeded()
             let fullScreenshot = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("editor-full-session.png")

@@ -2,6 +2,57 @@ import Foundation
 import CamOrderStudioCore
 
 @MainActor
+func runRegionClipboardRegression() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("CamOrder-clipboard-" + UUID().uuidString + ".camorderstudio")
+    let other = FileManager.default.temporaryDirectory.appendingPathComponent("CamOrder-other-" + UUID().uuidString + ".camorderstudio")
+    defer { try? FileManager.default.removeItem(at: folder); try? FileManager.default.removeItem(at: other) }
+    let store = ProjectStore()
+    store.document = try ProjectDocument.create(at: folder, project: .empty(name: "Clipboard regression"))
+    let media = MediaAsset(kind: .video, displayName: "Take", relativePath: "media/video/test.mov", durationSeconds: 20)
+    var source = VideoClip(clipId: "original", mediaAssetId: media.id, videoFile: media.relativePath, armedLaneId: "top", logicStartTimecode: .from(seconds: 4, frameRate: .fps30), logicStartSeconds: 4, durationSeconds: 5, frameRate: .fps30, trimInSeconds: 3, trimOutSeconds: 20, framing: ClipFraming(zoom: 1.2, offsetX: 0.2))
+    source.playbackSyncOffsetSeconds = 0.04
+    source.automationMarkers = [ClipAutomationMarker(timeSeconds: 1, framing: ClipFraming(zoom: 2)), ClipAutomationMarker(timeSeconds: 4, framing: ClipFraming(offsetX: -0.3))]
+    store.project.media = [media]
+    store.project.timeline.lanes = [VideoLane(id: "top", name: "Top", clips: [source]), VideoLane(id: "bottom", name: "Bottom")]
+    store.setVideoOffsetMS(-82); store.setVideoOffsetMS(120, laneID: "top"); store.setVideoOffsetMS(-35, laneID: "bottom")
+    store.selectedClipId = source.id
+    store.copySelectedRegion()
+    store.armLane("top")
+    store.pasteRegion(at: 15)
+    let first = store.selectedClip()!
+    require(first.id != source.id && first.armedLaneId == "top" && store.hasArmedLane)
+    require(abs(store.project.presentedClip(first).timelineStartSeconds - 15) < 0.000001)
+    require(first.trimInSeconds == 3 && first.durationSeconds == 5 && first.framing == source.framing && first.playbackSyncOffsetSeconds == 0.04)
+    require(first.automationMarkers.map(\.timeSeconds) == source.automationMarkers.map(\.timeSeconds) && first.automationMarkers[0].id != source.automationMarkers[0].id)
+    require(store.project.media.count == 1 && store.clip(id: source.id) == source)
+    store.undoProjectChange()
+    require(store.clip(id: first.id) == nil && store.hasArmedLane, "Paste is one Undo step and preserves arming")
+    store.redoProjectChange(); require(store.clip(id: first.id) == first)
+    store.pasteRegion(at: 20, laneID: "bottom")
+    let second = store.selectedClip()!
+    require(second.armedLaneId == "bottom" && abs(store.project.presentedClip(second).timelineStartSeconds - 20) < 0.000001)
+    store.pasteRegion(at: 0)
+    let atZero = store.selectedClip()!
+    require(abs(store.project.presentedClip(atZero).timelineStartSeconds) < 0.000001, "Positive lane offset must not push a paste away from zero")
+    require(store.playbackClip(at: 0)?.id == atZero.id)
+    store.pasteRegion(at: .nan)
+    require(store.selectedClipId == atZero.id)
+    // Copy/delete/paste retains the source reference after the last region is removed.
+    for id in store.project.timeline.lanes.flatMap(\.clips).map(\.id) { store.deleteClip(id) }
+    require(store.project.media.isEmpty && store.canPasteRegion)
+    store.pasteRegion(at: 25)
+    require(store.project.media == [media] && store.selectedClip()!.trimInSeconds == 3)
+    require(store.saveProject())
+    let reopened = try ProjectDocument.open(at: folder)
+    require(reopened.project.timeline == store.project.timeline)
+    store.document = try ProjectDocument.create(at: other, project: .empty())
+    require(!store.canPasteRegion, "Clipboard media must not leak into a different project")
+    store.pasteRegion(at: 10)
+    require(store.project.timeline.lanes.flatMap(\.clips).isEmpty)
+    print("PASS: region copy/paste preserves trims, framing and automation; independent offsets, zero position, repeated paste, armed Undo/Redo, deleted-source recovery, save/reopen and project isolation")
+}
+
+@MainActor
 func runEditingRegression() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("CamOrder-editing-" + UUID().uuidString + ".camorderstudio")
     defer { try? FileManager.default.removeItem(at: folder) }

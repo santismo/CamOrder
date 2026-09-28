@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.5.1 development build
+# CamOrder Studio Audio Unit — 0.5.2 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -43,6 +43,20 @@ The plug-in has one transport: the red button and **R** forward Logic’s R key 
 - Splits and trims retain the correct source frames and framing animation. Original source movies are never rewritten.
 
 Window behavior and screenshots were checked in an owned native AU host. Logic adds its own surrounding window controls and may impose additional sizing behavior.
+
+## Save and edit regions
+
+**Save** is beside Export, and **⌘S** saves the CamOrder project while its editor is active. The button briefly confirms **Saved**. Edits continue to save automatically. Saving the CamOrder project does not replace saving the Logic project.
+
+Select a region and drag its **left or right edge grip** to trim or restore available footage. Both grips have a larger target and a left/right resize cursor; narrow regions show the grips just outside their ends. The left edge changes the source in-point while keeping the right edge fixed. The right edge changes the end and stops at the source movie’s limit. Drag the middle to move the region. Each edge drag is one Undo step. Right-click a region for **Snap Left/Right Edge to Grid**.
+
+To repeat an edited region:
+
+1. Select it and click **Copy Region** above the timeline, press **⌘C**, or use the region’s right-click menu.
+2. Move to the destination in Logic, or click the CamOrder ruler/empty lane while stopped.
+3. Click **Paste**, press **⌘V**, or use **Paste at Playhead** in the context menu. Keyboard/toolbar Paste uses the copied region’s original lane. To choose another lane, right-click that lane and use **Paste Region Here at Playhead**.
+
+The pasted region’s visible left edge lands at the playhead, including the destination lane’s sync offset. Its source trim, duration, framing, camera calibration and automation are retained; the original region remains unchanged. Copy once and paste repeatedly. Paste supports Undo/Redo, including while armed, and shares the existing media file. Within a lane, the last pasted overlapping region takes precedence. The region clipboard belongs to the current CamOrder project/session; it is not a system movie-file clipboard and does not transfer footage between projects. Normal text copy/paste still works while editing a text field. Plain **C** continues to split at the playhead.
 
 ## Animate video framing
 
@@ -112,11 +126,12 @@ Stopped cursor movement can only be followed when Logic sends a position report.
 
 Live frames now update a native image layer directly. Timeline geometry and filmstrips no longer rebuild with every playhead tick; moving cursors and clocks update separately. Playback seeks are serialized, and resuming the decoder uses the requested host-clock anchor so seek completion does not leave a persistent playback delay.
 
-The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **350 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
+The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **348 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
 
 ## Verification
 
-- 47 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
+- 48 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
+- Region editing regression: native left/right edge mouse gestures, narrow regions and project zero, one-step Undo, copy/paste with independent destination offsets, preserved trims/framing/automation, repeated paste, deleted-source recovery, project isolation, save/reopen and ⌘C/⌘V/⌘S dispatch.
 - Calculator session regression: project/lane Apply, existing-offset refinement, save/reopen, Undo, repeated/stale/out-of-range protection and inputs retained across editor recreation.
 - Installed-component validation with Apple’s `auval` for `aufx / CmSt / Sntm`.
 - Bit-exact mono/stereo pass-through at 44.1, 48 and 96 kHz, including silent input and 1/64/512-frame blocks; independent Audio Unit instance state.

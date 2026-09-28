@@ -97,7 +97,7 @@ func runMultiInputRegression() throws {
     let view = Unmanaged<NSView>.fromOpaque(createCamOrderView(bridge)).takeRetainedValue()
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 960), styleMask: [.titled,.resizable], backing: .buffered, defer: false)
     window.contentView = view; window.setContentSize(NSSize(width: 1280, height: 960)); view.setFrameSize(NSSize(width: 1280, height: 960))
-    window.title = "CamOrder Studio 0.5.1"; window.center(); window.makeKeyAndOrderFront(nil)
+    window.title = "CamOrder Studio 0.5.2"; window.center(); window.makeKeyAndOrderFront(nil)
     RunLoop.main.run(until: Date().addingTimeInterval(0.8)); view.layoutSubtreeIfNeeded()
     if CommandLine.arguments.count > 1, let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
         let url = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("editor-multicam.png")

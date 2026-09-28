@@ -35,9 +35,11 @@ extension VideoClip {
         return (first, second)
     }
 
-    public mutating func trimLeftEdge(to requestedStart: Double) {
+    public mutating func trimLeftEdge(to requestedStart: Double, minimumTimelineStart: Double = 0) {
         let end = timelineStartSeconds + durationSeconds
-        let earliest = max(0, timelineStartSeconds - trimInSeconds)
+        // Presentation offsets can put visible zero before underlying zero.
+        // Keep an already earlier edge stable, and allow restoring its footage.
+        let earliest = min(timelineStartSeconds, max(minimumTimelineStart, timelineStartSeconds - trimInSeconds))
         let start = max(earliest, min(requestedStart, end - min(0.1, durationSeconds)))
         let delta = start - timelineStartSeconds
         timelineStartSeconds = start

@@ -24,7 +24,7 @@ CamOrder runs as an Audio Unit effect. Use one instance on Stereo Out for the wh
 
 The installer is unsigned and not notarized. macOS may require approval in **System Settings → Privacy & Security** after opening it; follow [Apple’s instructions](https://support.apple.com/102445) only if you trust the download.
 
-Normal Stereo Out operation uses Logic's Audio Unit transport: no MIDI, MTC or timecode-audio routing is required. See the [guide](CamOrderStudio/README-AU.md) for permissions, transport fallback and troubleshooting.
+Normal Stereo Out operation uses Logic's Audio Unit transport: no MIDI, MTC or timecode-audio routing is required. See the [recording walkthrough](https://santismo.github.io/CamOrder/#recording) for audio-track and video-lane arming, or the [guide](CamOrderStudio/README-AU.md) for permissions, transport fallback and troubleshooting.
 
 ## One camera or several
 
@@ -44,6 +44,8 @@ Webcams, macOS-exposed iPhone/Continuity Camera inputs, and main-display screen 
 - Non-destructive lane and project sync adjustments, starting at **0 ms**, applied separately to each lane in playback and export. The movie’s edited start stays fixed, so corrections remain effective when you reimport at the same beat.
 - Export the edited timeline, selected region's range, time from the playhead, project origin or a custom range. Trimmed source frames and adjusted positions are preserved.
 - A placement note accompanies the movie. Import it into Logic's movie track and place it at the noted start; movie import and positioning are manual.
+
+The [shortcut reference](https://santismo.github.io/CamOrder/#shortcuts) covers selection, grouped cuts and trims, numbered layers, automation markers, deleting, undoing and saving. Use editing shortcuts with CamOrder's editor active; save your Logic project separately too.
 
 Camera takes contain video only. Import a bounced master if you want audio in the exported movie; the plug-in does not capture Logic's mix.
 

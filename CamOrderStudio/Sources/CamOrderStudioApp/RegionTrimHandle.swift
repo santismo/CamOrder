@@ -17,25 +17,47 @@ struct RegionTrimHandle: NSViewRepresentable {
         view.toolTip = left ? "Drag to trim or extend the region’s left edge" : "Drag to trim or extend the region’s right edge"
         view.setAccessibilityLabel(left ? "Region left edge" : "Region right edge")
         view.selected = selected
-        view.onSelect = onSelect; view.onChange = onChange; view.onEnd = onEnd
+        view.onSelect = { _ in onSelect() }; view.onChange = onChange; view.onEnd = onEnd
         view.needsDisplay = true
     }
 }
 
+struct RegionMoveHandle: NSViewRepresentable {
+    let clipID: String
+    let onSelect: (NSEvent.ModifierFlags) -> Void
+    let onClick: () -> Void
+    let onChange: (CGFloat) -> Void
+    let onEnd: (CGFloat) -> Void
+    func makeNSView(context: Context) -> RegionTrimNSView {
+        let view = RegionTrimNSView(); view.isBody = true; return view
+    }
+    func updateNSView(_ view: RegionTrimNSView, context: Context) {
+        view.identifier = NSUserInterfaceItemIdentifier("region-body-\(clipID)")
+        view.toolTip = "Shift-click to add/remove a region. Drag to move the selection. Option-drag bypasses snapping."
+        view.setAccessibilityLabel("Select or move region")
+        view.onSelect = onSelect; view.onClick = onClick
+        view.onChange = onChange; view.onEnd = onEnd
+    }
+}
+
 final class RegionTrimNSView: NSView {
+    var isBody = false
     var selected = false
-    var onSelect: (() -> Void)?
+    var onSelect: ((NSEvent.ModifierFlags) -> Void)?
+    var onClick: (() -> Void)?
     var onChange: ((CGFloat) -> Void)?
     var onEnd: ((CGFloat) -> Void)?
     private var origin: CGFloat?
     private var dragging = false
+    private var extendingSelection = false
     private var dragChange: ((CGFloat) -> Void)?
     private var dragEnd: ((CGFloat) -> Void)?
     private weak var timeline: TimelineNativeScrollView?
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: isBody ? .openHand : .resizeLeftRight) }
     override func draw(_ dirtyRect: NSRect) {
+        guard !isBody else { return }
         NSColor.black.withAlphaComponent(0.55).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 2), xRadius: 4, yRadius: 4).fill()
         (selected ? NSColor.systemYellow : NSColor.white.withAlphaComponent(0.75)).setFill()
@@ -44,10 +66,11 @@ final class RegionTrimNSView: NSView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         origin = event.locationInWindow.x; dragging = false
+        extendingSelection = event.modifierFlags.contains(.shift)
         dragChange = onChange; dragEnd = onEnd
         timeline = enclosingScrollView as? TimelineNativeScrollView
         timeline?.manualUntil = .infinity
-        onSelect?()
+        onSelect?(event.modifierFlags)
     }
     override func mouseDragged(with event: NSEvent) {
         guard let origin else { return }
@@ -58,6 +81,7 @@ final class RegionTrimNSView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard let origin else { return }
         if dragging { dragEnd?(event.locationInWindow.x - origin) }
+        else if isBody && !extendingSelection { onClick?() }
         finishDrag()
     }
     override func viewWillMove(toWindow newWindow: NSWindow?) {

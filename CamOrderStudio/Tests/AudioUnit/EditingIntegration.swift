@@ -103,6 +103,7 @@ func runEditingRegression() throws {
     offsetSelection.choice = .custom; offsetSelection.startText = "11.25"; offsetSelection.endText = "12.5"
     require(offsetSelection.range!.durationSeconds == 1.25)
     let beforeCut = store.selectedClip()!
+    store.setSnapToGrid(false) // This regression checks exact off-grid offset arithmetic.
     store.cutSelectedClip(at: beforeCut.timelineStartSeconds - 0.03 + 1)
     require(abs(store.selectedClip()!.trimInSeconds - beforeCut.trimInSeconds - 1) < 0.00001, "Cuts use the offset-adjusted playhead")
     let offsetReopen = try ProjectDocument.open(at: folder)
@@ -146,4 +147,81 @@ func runEditingRegression() throws {
     store.project.timeline.lanes[1].clips[0].isEnabled = false
     require(store.playbackClip(at: 10) == nil, "Muted/disabled selection cannot leak onto the stage")
     print("PASS: top-lane playback ignores selection; framing stays on its target and survives save/reopen/undo; split, trim, grid alignment and source bounds")
+}
+
+@MainActor
+func runMusicalRegionEditingRegression() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("CamOrder-musical-" + UUID().uuidString + ".camorderstudio")
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let store = ProjectStore()
+    store.document = try ProjectDocument.create(at: folder, project: .empty())
+    let media = MediaAsset(kind: .video, displayName: "Camera", relativePath: "camera.mov", durationSeconds: 20)
+    store.project.media = [media]
+    store.project.sync.videoOffsetMS = -82
+    for index in 0..<3 {
+        let laneID = store.project.timeline.lanes[index].id
+        store.project.timeline.lanes[index].videoOffsetMS = Double(index * 30)
+        let offset = store.project.videoOffsetSeconds(forLane: laneID)
+        let clip = VideoClip(clipId: "Camera \(index + 1)", mediaAssetId: media.id, videoFile: media.relativePath, armedLaneId: laneID,
+            logicStartTimecode: .from(seconds: 4, frameRate: .fps30), logicStartSeconds: 4,
+            timelineStartSeconds: 4 - offset, durationSeconds: 8, frameRate: .fps30, trimInSeconds: Double(index + 1))
+        store.project.timeline.lanes[index].clips = [clip]
+    }
+    let originals = store.project.timeline.lanes.flatMap(\.clips), ids = originals.map(\.id)
+    store.selectRegion(ids[0]); store.selectRegion(ids[1], extending: true); store.selectRegion(ids[2], extending: true)
+    require(store.selectedClipIDs.count == 3)
+    store.selectRegion(ids[1], extending: true); require(store.selectedClipIDs.count == 2)
+    store.selectRegion(ids[1], extending: true)
+    store.selectRegion(ids[2], preserveGroup: true); require(store.selectedClipIDs.count == 3)
+    store.receiveHostGrid(seconds: 10, beat: 12, tempo: 88)
+    let expected = store.musicalGrid.snapped(8.15, division: .beat)
+    store.cutSelectedClip(at: 8.15)
+    require(store.selectedClipIDs.count == 3 && store.project.timeline.lanes.allSatisfy { $0.clips.count == 2 })
+    for (index, clip) in store.selectedRegions().enumerated() {
+        require(abs(store.project.presentedClip(clip).timelineStartSeconds - expected) < 1e-9)
+        require(abs(clip.trimInSeconds - originals[index].trimInSeconds - (expected - 4)) < 1e-9)
+    }
+    store.undoProjectChange()
+    require(store.project.timeline.lanes.flatMap(\.clips) == originals, "A three-camera cut is one Undo")
+    store.setRegionSelection(Set(ids), primary: ids[0])
+    store.setSelectedRegionLayer(3)
+    store.selectRegion(ids[1]); store.setSelectedRegionLayer(2)
+    store.selectRegion(ids[2]); store.setSelectedRegionLayer(1)
+    require(store.playbackClip(at: 6)?.id == ids[2], "Lower lane assigned foreground must win")
+    store.selectRegion(ids[0]); store.setSelectedRegionLayer(1)
+    require(store.playbackClip(at: 6)?.id == ids[0])
+    store.selectRegion(ids[2]); store.setSelectedRegionLayer(1)
+    require(store.playbackClip(at: 6)?.id == ids[2], "Pressing 1 again promotes the chosen region ahead of another foreground")
+    store.selectRegion(ids[0]); store.setSelectedRegionLayer(3)
+    store.setRegionSelection(Set(ids), primary: ids[0])
+    let beforeMove = store.project
+    let delta = store.regionEditDelta(anchor: ids[0], kind: .move, translation: 0.6)
+    store.previewRegionEdit(anchor: ids[0], kind: .move, translation: 0.6)
+    require(store.project == beforeMove && store.regionEditPreview?.ids.count == 3)
+    store.commitRegionEdit(anchor: ids[0], kind: .move, translation: 0.6)
+    for clip in store.selectedRegions() { require(abs(store.project.presentedClip(clip).timelineStartSeconds - 4 - delta) < 1e-9) }
+    store.undoProjectChange(); store.setRegionSelection(Set(ids), primary: ids[0])
+    store.commitRegionEdit(anchor: ids[0], kind: .left, translation: -50, bypassSnap: true)
+    for (index, clip) in store.selectedRegions().enumerated() {
+        require(abs(store.project.presentedClip(clip).timelineStartSeconds - 3) < 1e-9)
+        require(abs(clip.trimInSeconds - Double(index)) < 1e-9)
+    }
+    store.undoProjectChange(); store.setRegionSelection(Set(ids), primary: ids[0])
+    store.commitRegionEdit(anchor: ids[0], kind: .right, translation: 50, bypassSnap: true)
+    require(store.selectedRegions().allSatisfy { abs($0.durationSeconds - 17) < 1e-9 }, "Tightest camera source constrains every selected right edge")
+    store.undoProjectChange(); store.setRegionSelection(Set(ids), primary: ids[0])
+    store.setSnapToGrid(false)
+    store.commitRegionEdit(anchor: ids[0], kind: .move, translation: 0.123)
+    require(abs(store.project.presentedClip(store.selectedRegions()[0]).timelineStartSeconds - 4.123) < 1e-9)
+    store.copySelectedRegion(); store.pasteRegion(at: 22)
+    require(store.selectedRegions().count == 3 && store.selectedRegions().allSatisfy { abs(store.project.presentedClip($0).timelineStartSeconds - 22) < 1e-9 })
+    require(store.selectedRegions().map(\.compositingLayer) == [3, 2, 1])
+    store.armLane("lane_1")
+    let deleted = store.selectedRegions()
+    store.deleteSelectedClip(); require(store.project.timeline.lanes.flatMap(\.clips).count == 3)
+    store.undoProjectChange()
+    require(deleted.allSatisfy { store.clip(id: $0.id) == $0 } && store.hasArmedLane)
+    let saved = try ProjectDocument.open(at: folder)
+    require(saved.project.timeline == store.project.timeline)
+    print("PASS: host-anchored 88 BPM snapping, Shift-selection, three-camera cuts, group moves/trims/source limits, layer ordering, grouped clipboard, armed Undo and save/reopen")
 }

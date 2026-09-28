@@ -66,6 +66,8 @@ public struct Timeline: Codable, Equatable, Sendable {
     public var lanes: [VideoLane]
     public var tempoBPM: Double?
     public var gridDivision: BeatGridDivision?
+    public var gridOriginSeconds: Double?
+    public var snapToGrid: Bool?
 
     public init(durationSeconds: Double = 0, lanes: [VideoLane] = [], tempoBPM: Double? = 120, gridDivision: BeatGridDivision? = .beat) {
         self.durationSeconds = durationSeconds
@@ -148,6 +150,9 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
     public var framing: ClipFraming?
     public var playbackSyncOffsetSeconds: Double?
     public var automationMarkers: [ClipAutomationMarker]
+    /// 1 is frontmost. Nil keeps legacy lane ordering behind numbered layers.
+    public var compositingLayer: Int?
+    public var layerAssignmentOrder: Int?
 
     public init(
         id: String = UUID().uuidString,
@@ -169,7 +174,8 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         isEnabled: Bool = true,
         framing: ClipFraming? = nil,
         playbackSyncOffsetSeconds: Double? = nil,
-        automationMarkers: [ClipAutomationMarker] = []
+        automationMarkers: [ClipAutomationMarker] = [],
+        compositingLayer: Int? = nil
     ) {
         self.id = id
         self.clipId = clipId
@@ -191,6 +197,7 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         self.framing = framing
         self.playbackSyncOffsetSeconds = playbackSyncOffsetSeconds
         self.automationMarkers = automationMarkers
+        self.compositingLayer = compositingLayer
     }
 
     public static func timelineStart(logicStartSeconds: Double, captureLatencyMs: Int) -> Double {
@@ -253,6 +260,7 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         case framing
         case playbackSyncOffsetSeconds
         case automationMarkers
+        case compositingLayer, layerAssignmentOrder
     }
 
     public init(from decoder: Decoder) throws {
@@ -278,6 +286,8 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         framing = try container.decodeIfPresent(ClipFraming.self, forKey: .framing)
         playbackSyncOffsetSeconds = try container.decodeIfPresent(Double.self, forKey: .playbackSyncOffsetSeconds)
         automationMarkers = try container.decodeIfPresent([ClipAutomationMarker].self, forKey: .automationMarkers) ?? []
+        layerAssignmentOrder = try container.decodeIfPresent(Int.self, forKey: .layerAssignmentOrder)
+        compositingLayer = try container.decodeIfPresent(Int.self, forKey: .compositingLayer).flatMap { (1...9).contains($0) ? $0 : nil }
     }
 }
 

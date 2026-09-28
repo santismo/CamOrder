@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.5.2 development build
+# CamOrder Studio Audio Unit — 0.6.0 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -19,7 +19,7 @@ New projects start with three lanes; **+** adds more. Each lane starts at **Defa
 
 Choose another source in a lane’s input menu to give it its own camera. The Live Inputs panel shows **one preview per distinct source**, labeled with the lanes using it. Assign the same source to several lanes to share its preview and connection. Choose **No input** for a lane used only for imported footage. Source assignments save with the project.
 
-Arm any combination of lanes. Their different cameras follow the same Logic Play/Record/Stop clock and keep recording with the editor closed. A camera failure finalizes and disarms its affected lanes; the other cameras continue. Each lane keeps its own video-sync adjustment. Main Stage and export combine the visible lanes. The top lane is in front; make its video smaller or move it aside to reveal videos on lower lanes.
+Arm any combination of lanes. Their different cameras follow the same Logic Play/Record/Stop clock and keep recording with the editor closed. A camera failure finalizes and disarms its affected lanes; the other cameras continue. Each lane keeps its own video-sync adjustment. Main Stage and export combine visible regions using their assigned output layers. Numbered layers override lane position; without assignments, the top lane remains in front. Make foreground video smaller or move it aside to reveal the layers behind it.
 
 A lane armed during playback starts at the current position. Disarming one shared-camera lane fixes that region’s end while the other lanes keep recording. Its region shows **finishing** until the shared movie is finalized; stop the other lanes sharing that input before rearming that particular lane. Camera selection and capture-region changes are locked while affected lanes are armed or finishing.
 
@@ -36,7 +36,7 @@ The plug-in has one transport: the red button and **R** forward Logic’s R key 
 - Drag the divider between **Main Stage and Live Inputs** to change their widths. Drag the horizontal divider above the timeline to change monitor/timeline heights. **View** can hide Live Inputs or the timeline and reset panel sizes.
 - Main Stage remains available in compact layouts. Each lane’s input selector stays with its name and Arm controls. Lane headers and their Arm buttons scroll together with the timeline.
 - The four small exterior canvas corners adjust width and height independently. Drag inside the video to position it; use pinch or Inspector zoom for framing. Inspector also provides rotation and canvas dimensions.
-- Main Stage and export layer **one enabled region from each unmuted lane**, with the top lane in front. Selecting a region chooses what to edit without changing layer order. Smaller or moved foreground videos reveal lower videos; within one lane, the last overlapping region wins. Gaps with no visible video remain black.
+- Main Stage and export share **Output Layer** ordering. Selecting a region chooses what to edit; assigning a number determines where it appears in the final composition. Smaller or moved foreground videos reveal the layers behind them. Muted lanes and disabled regions stay hidden; empty gaps stay black.
 - Press Return or click outside a lane name to commit it and release keyboard focus; Escape cancels the current rename.
 - Delete and Undo/Redo work while a lane is armed or recording. Undo preserves current arming and capture connections, so it does not silently rearm a finished lane.
 - During Play/Record, the timeline keeps the playhead near the center, clamped at the left edge near project start. Scrolling gives you two seconds to look elsewhere before following resumes. Pinch the trackpad over the timeline to zoom around the pointer.
@@ -48,15 +48,37 @@ Window behavior and screenshots were checked in an owned native AU host. Logic a
 
 **Save** is beside Export, and **⌘S** saves the CamOrder project while its editor is active. The button briefly confirms **Saved**. Edits continue to save automatically. Saving the CamOrder project does not replace saving the Logic project.
 
-Select a region and drag its **left or right edge grip** to trim or restore available footage. Both grips have a larger target and a left/right resize cursor; narrow regions show the grips just outside their ends. The left edge changes the source in-point while keeping the right edge fixed. The right edge changes the end and stops at the source movie’s limit. Drag the middle to move the region. Each edge drag is one Undo step. Right-click a region for **Snap Left/Right Edge to Grid**.
+Select a region, or **Shift-click** to add/remove regions in a group. **⌘A** selects all regions when the editor has focus. Drag a selected region to move the group; drag its **left or right edge grip** to trim or restore available footage. Both grips have a larger target and a left/right resize cursor; narrow regions show the grips just outside their ends. The left edge changes the source in-point while keeping the right edge fixed. The right edge changes the end and stops at the source movie’s limit. Drag the middle to move the region. The same time adjustment applies to every selected region, constrained by the tightest source or timeline limit so the cameras remain aligned. Each group gesture is one Undo step. Right-click a region for **Snap Left/Right Edge to Grid**.
 
-To repeat an edited region:
+To repeat edited regions:
 
-1. Select it and click **Copy Region** above the timeline, press **⌘C**, or use the region’s right-click menu.
+1. Select one or more regions and click **Copy** above the timeline, press **⌘C**, or use the region’s right-click menu.
 2. Move to the destination in Logic, or click the CamOrder ruler/empty lane while stopped.
-3. Click **Paste**, press **⌘V**, or use **Paste at Playhead** in the context menu. Keyboard/toolbar Paste uses the copied region’s original lane. To choose another lane, right-click that lane and use **Paste Region Here at Playhead**.
+3. Click **Paste**, press **⌘V**, or use **Paste at Playhead** in the context menu. Keyboard/toolbar Paste preserves the copied regions’ original lanes and relative timing. To choose another lane, right-click that lane and use **Paste Region Here at Playhead**.
 
-The pasted region’s visible left edge lands at the playhead, including the destination lane’s sync offset. Its source trim, duration, framing, camera calibration and automation are retained; the original region remains unchanged. Copy once and paste repeatedly. Paste supports Undo/Redo, including while armed, and shares the existing media file. Within a lane, the last pasted overlapping region takes precedence. The region clipboard belongs to the current CamOrder project/session; it is not a system movie-file clipboard and does not transfer footage between projects. Normal text copy/paste still works while editing a text field. Plain **C** continues to split at the playhead.
+The earliest copied region’s visible left edge lands at the playhead, accounting for each destination lane’s sync offset; other regions retain their relative timing. Source trim, duration, framing, camera calibration, output layer and automation are retained; the original region remains unchanged. Copy once and paste repeatedly. Paste supports Undo/Redo, including while armed, and shares the existing media file. Within the same lane and layer, the last pasted overlapping region takes precedence unless another region has a newer explicit layer assignment. The region clipboard belongs to the current CamOrder project/session; it is not a system movie-file clipboard and does not transfer footage between projects. Normal text copy/paste still works while editing a text field. **T** and the scissors button split all selected regions that cross the playhead; plain **C** remains an alias. With Snap enabled, the cut uses the nearest grid point. The right-hand pieces stay selected for the next edit; Delete removes the selected group and Undo restores it in one step.
+
+## Beat grid and snapping
+
+The timeline toolbar always shows **Snap**, grid division and current BPM, even with the Inspector hidden. In Logic, the AU’s reported **tempo and quarter-note beat position** automatically determine the grid; no manual “use detected tempo” step is needed. Snap defaults on. Choose a beat or a subdivision for tighter cuts. The **1 bar** option currently means four quarter-note beats.
+
+Cuts, region moves, both trim edges and stopped timeline scrubbing use the same grid in visible timeline coordinates, including lane/project offsets. A group uses the region you drag as its snap anchor and preserves the other regions’ relative timing. Source limits take precedence at a footage boundary. Turn **Snap** off for free editing, or hold **Option** while dragging to bypass it temporarily. Pasting lands at the current playhead.
+
+The host reports its current tempo, not a full project tempo map. For a project with tempo changes, position Logic in the section you are editing first; the grid updates to that tempo and beat phase. This does not time-stretch footage or automatically move existing edits when the tempo changes. The last detected grid is retained while Logic is stopped and saved with the project; a manual BPM is available before a host tempo is received.
+
+## Foreground and background
+
+Select one or more regions and use **Output Layer** above the timeline, or press a number while the CamOrder editor has keyboard focus:
+
+- **1 — Foreground**, cyan border and badge.
+- **2 — Middle ground**, mint border and badge.
+- **3 — Background**, purple border and badge.
+- **4–9** — progressively farther behind the lower numbers.
+- **0 — Automatic**, restoring lane order behind numbered layers.
+
+A **yellow outline** means selected for editing; the numbered badge and colored border identify its output layer. The same ordering is used in Main Stage and the exported movie. If two overlapping regions share a number, the most recently assigned one is in front; equal assignments use lane order. Reassigning **1** brings the chosen region ahead of another layer-1 region. Within one lane and layer, remaining ties use the last overlapping region; different numbered layers can coexist within a lane.
+
+Assignments survive splitting, trimming, copy/paste, Undo and save/reopen. Unassigned regions remain available behind numbered layers, so existing projects keep their previous appearance until you assign layers. A small foreground reveals the videos behind it. Number and editing shortcuts do not apply while you are typing in a text field.
 
 ## Animate video framing
 
@@ -126,12 +148,12 @@ Stopped cursor movement can only be followed when Logic sends a position report.
 
 Live frames now update a native image layer directly. Timeline geometry and filmstrips no longer rebuild with every playhead tick; moving cursors and clocks update separately. Playback seeks are serialized, and resuming the decoder uses the requested host-clock anchor so seek completion does not leave a persistent playback delay.
 
-The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **348 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
+The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **358 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
 
 ## Verification
 
-- 48 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
-- Region editing regression: native left/right edge mouse gestures, narrow regions and project zero, one-step Undo, copy/paste with independent destination offsets, preserved trims/framing/automation, repeated paste, deleted-source recovery, project isolation, save/reopen and ⌘C/⌘V/⌘S dispatch.
+- 51 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
+- Region editing regression: host beat/tempo phase at 88 BPM, Shift-selection and group cut/move/trim with independent offsets, source limits, numbered output layers, grouped clipboard and Undo; native left/right edge mouse gestures, narrow regions and project zero, one-step Undo, copy/paste with independent destination offsets, preserved trims/framing/automation, repeated paste, deleted-source recovery, project isolation, save/reopen and ⌘C/⌘V/⌘S dispatch.
 - Calculator session regression: project/lane Apply, existing-offset refinement, save/reopen, Undo, repeated/stale/out-of-range protection and inputs retained across editor recreation.
 - Installed-component validation with Apple’s `auval` for `aufx / CmSt / Sntm`.
 - Bit-exact mono/stereo pass-through at 44.1, 48 and 96 kHz, including silent input and 1/64/512-frame blocks; independent Audio Unit instance state.

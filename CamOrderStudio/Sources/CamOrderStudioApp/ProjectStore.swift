@@ -24,15 +24,30 @@ final class ProjectStore: ObservableObject {
     @Published var lastExportURL: URL?
     @Published var document: ProjectDocument?
     @Published var selectedMediaAssetId: String?
-    @Published var selectedClipId: String?
+    @Published private(set) var selectedClipIDs = Set<String>()
+    @Published private var primaryClipID: String?
+    var selectedClipId: String? {
+        get { primaryClipID }
+        set { setRegionSelection(newValue.map { [$0] } ?? [], primary: newValue) }
+    }
+    @Published private(set) var hostGrid: MusicalGrid?
+    @Published private(set) var regionEditPreview: RegionEditPreview?
+
+    enum RegionEditKind { case move, left, right }
+    struct RegionEditPreview: Equatable {
+        var ids: Set<String>
+        var kind: RegionEditKind
+        var delta: Double
+    }
     @Published var lastError: String?
     @Published private(set) var lastManualSaveAt: Date?
     @Published private(set) var regionClipboard: RegionClipboard?
 
     struct RegionClipboard {
         let folderURL: URL
-        let clip: VideoClip
-        let media: MediaAsset
+        let clips: [VideoClip]
+        let media: [MediaAsset]
+        let presentedStarts: [String: Double]
     }
     @Published var pendingTakes: [String: PendingTakeRegion] = [:]
     @Published var captureEndSeconds: [String: Double] = [:]
@@ -158,7 +173,7 @@ final class ProjectStore: ObservableObject {
     }
 
     var tempoBPM: Double {
-        project.timeline.tempoBPM ?? 120
+        musicalGrid.tempoBPM
     }
 
     var gridDivision: BeatGridDivision {
@@ -166,7 +181,27 @@ final class ProjectStore: ObservableObject {
     }
 
     var gridSeconds: Double {
-        max(0.001, 60.0 / max(1, tempoBPM) * gridDivision.beats)
+        musicalGrid.spacing(gridDivision)
+    }
+
+    var musicalGrid: MusicalGrid {
+        hostGrid ?? MusicalGrid(tempoBPM: project.timeline.tempoBPM ?? 120, originSeconds: project.timeline.gridOriginSeconds ?? 0)
+    }
+    var snapToGrid: Bool { project.timeline.snapToGrid ?? true }
+    func setSnapToGrid(_ value: Bool) {
+        guard document != nil else { return }
+        project.timeline.snapToGrid = value
+        saveProject()
+    }
+    func snappedTime(_ seconds: Double, bypass: Bool = false) -> Double {
+        snapToGrid && !bypass ? musicalGrid.snapped(seconds, division: gridDivision) : seconds
+    }
+    func receiveHostGrid(seconds: Double, beat: Double, tempo: Double) {
+        guard let grid = MusicalGrid(hostSeconds: seconds, beat: beat, tempoBPM: tempo) else { return }
+        // Stable host reports must not invalidate the entire editor every audio block.
+        if let old = hostGrid, abs(old.tempoBPM - grid.tempoBPM) < 0.0001,
+           abs(old.originSeconds - grid.originSeconds) < 0.0001 { return }
+        hostGrid = grid
     }
 
     var clockDisplayFormat: ClockDisplayFormat {
@@ -251,7 +286,12 @@ final class ProjectStore: ObservableObject {
 
     @discardableResult
     func saveProject() -> Bool {
-        guard let document else { return false }
+        guard var document else { return false }
+        if let hostGrid {
+            document.project.timeline.tempoBPM = hostGrid.tempoBPM
+            document.project.timeline.gridOriginSeconds = hostGrid.originSeconds
+            self.document = document
+        }
         do {
             try document.save()
             onDocumentChange?()
@@ -275,40 +315,56 @@ final class ProjectStore: ObservableObject {
     }
 
     func copySelectedRegion() {
-        guard let document, let clip = selectedClip(), let media = mediaAsset(for: clip) else { return }
-        regionClipboard = RegionClipboard(folderURL: document.folderURL, clip: clip, media: media)
+        guard let document else { return }
+        let clips = selectedRegions().filter { mediaAsset(for: $0) != nil }
+        guard !clips.isEmpty else { return }
+        regionClipboard = RegionClipboard(folderURL: document.folderURL, clips: clips,
+            media: document.project.media.filter { asset in clips.contains { $0.mediaAssetId == asset.id } },
+            presentedStarts: Dictionary(uniqueKeysWithValues: clips.map { ($0.id, project.presentedClip($0).timelineStartSeconds) }))
     }
 
-    /// The clipboard keeps the original edit and media reference even if the source region is deleted.
+    /// Paste a group with its camera alignment intact, translating presentation
+    /// positions into each destination lane's independent sync offset.
     func pasteRegion(at seconds: Double, laneID: String? = nil) {
-        guard seconds.isFinite, canPasteRegion, var document, let copied = regionClipboard else { return }
-        let destination = laneID ?? copied.clip.armedLaneId
-        guard let laneIndex = document.project.timeline.lanes.firstIndex(where: { $0.id == destination })
-                ?? (laneID == nil ? document.project.timeline.lanes.indices.first : nil) else { return }
-        let lane = document.project.timeline.lanes[laneIndex]
-        var clip = copied.clip
-        clip.id = UUID().uuidString
-        clip.clipId += "_copy"
-        clip.armedLaneId = lane.id
-        // Place the visible edge exactly at the playhead, including lane/project offsets.
-        clip.timelineStartSeconds = max(0, seconds) - document.project.videoOffsetSeconds(forLane: lane.id)
-        for index in clip.automationMarkers.indices { clip.automationMarkers[index].id = UUID().uuidString }
-        registerUndo(project: document.project)
-        if !document.project.media.contains(where: { $0.id == copied.media.id }) {
-            document.project.media.append(copied.media)
+        guard seconds.isFinite, canPasteRegion, var document, let copied = regionClipboard,
+              let firstStart = copied.presentedStarts.values.min() else { return }
+        var pasted: [VideoClip] = []
+        let previous = document.project
+        for source in copied.clips {
+            let destination = laneID ?? source.armedLaneId
+            guard let laneIndex = document.project.timeline.lanes.firstIndex(where: { $0.id == destination })
+                    ?? (laneID == nil ? document.project.timeline.lanes.indices.first : nil) else { continue }
+            let lane = document.project.timeline.lanes[laneIndex]
+            var clip = source
+            clip.id = UUID().uuidString; clip.clipId += "_copy"; clip.armedLaneId = lane.id
+            clip.timelineStartSeconds = max(0, seconds) + (copied.presentedStarts[source.id] ?? firstStart) - firstStart
+                - document.project.videoOffsetSeconds(forLane: lane.id)
+            for index in clip.automationMarkers.indices { clip.automationMarkers[index].id = UUID().uuidString }
+            document.project.timeline.lanes[laneIndex].clips.append(clip)
+            document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
+            pasted.append(clip)
         }
-        document.project.timeline.lanes[laneIndex].clips.append(clip)
-        document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
+        guard !pasted.isEmpty else { return }
+        registerUndo(project: previous)
+        for media in copied.media where !document.project.media.contains(where: { $0.id == media.id }) { document.project.media.append(media) }
         self.document = document
-        selectedClipId = clip.id
-        selectedMediaAssetId = clip.mediaAssetId
+        setRegionSelection(Set(pasted.map(\.id)), primary: pasted.first?.id)
         saveProject()
     }
 
     func handleProjectShortcut(_ event: NSEvent, at seconds: Double) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        if modifiers.isEmpty {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "t", "c": if !event.isARepeat { cutSelectedClip(at: seconds) }; return true
+            case let key? where key.count == 1 && Int(key) != nil:
+                if !event.isARepeat { setSelectedRegionLayer(Int(key) == 0 ? nil : Int(key)) }; return true
+            default: break
+            }
+        }
         guard modifiers.contains(.command), !modifiers.contains(.option), !modifiers.contains(.control) else { return false }
         switch event.charactersIgnoringModifiers?.lowercased() {
+        case "a" where !modifiers.contains(.shift): setRegionSelection(Set(project.timeline.lanes.flatMap(\.clips).map(\.id)), primary: selectedClipId)
         case "s" where !modifiers.contains(.shift): saveProjectManually()
         case "c" where !modifiers.contains(.shift): copySelectedRegion()
         case "v" where !modifiers.contains(.shift): pasteRegion(at: seconds)
@@ -636,6 +692,7 @@ final class ProjectStore: ObservableObject {
 
     func setTempoBPM(_ bpm: Double) {
         guard var document else { return }
+        guard bpm.isFinite, hostGrid == nil else { return }
         registerUndo(project: document.project)
         document.project.timeline.tempoBPM = max(1, bpm)
         self.document = document
@@ -1049,7 +1106,7 @@ final class ProjectStore: ObservableObject {
     func snapSelectedClipStartToGrid() {
         editSelectedClipOnGrid { clip, gridSeconds in
             let offset = project.videoOffsetSeconds(forLane: clip.armedLaneId)
-            let snappedStart = ((clip.timelineStartSeconds + offset) / gridSeconds).rounded() * gridSeconds - offset
+            let snappedStart = musicalGrid.snapped(clip.timelineStartSeconds + offset, division: gridDivision) - offset
             clip.trimLeftEdge(to: snappedStart, minimumTimelineStart: -offset)
         }
     }
@@ -1058,7 +1115,7 @@ final class ProjectStore: ObservableObject {
         editSelectedClipOnGrid { clip, gridSeconds in
             let end = clip.timelineStartSeconds + clip.durationSeconds
             let offset = project.videoOffsetSeconds(forLane: clip.armedLaneId)
-            let snappedEnd = max(clip.timelineStartSeconds + 0.1, ((end + offset) / gridSeconds).rounded() * gridSeconds - offset)
+            let snappedEnd = max(clip.timelineStartSeconds + 0.1, musicalGrid.snapped(end + offset, division: gridDivision) - offset)
             clip.durationSeconds = max(0.1, snappedEnd - clip.timelineStartSeconds)
         }
     }
@@ -1076,27 +1133,30 @@ final class ProjectStore: ObservableObject {
     }
 
     func cutSelectedClip(at seconds: Double) {
-        guard let selectedClipId else { return }
-        guard var document else { return }
+        guard seconds.isFinite, !selectedClipIDs.isEmpty, var document else { return }
+        let cut = snappedTime(seconds)
+        let previous = document.project
+        var selection = selectedClipIDs
+        var primary = selectedClipId
+        var changed = false
         for laneIndex in document.project.timeline.lanes.indices {
-            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == selectedClipId }) else {
-                continue
+            let lane = document.project.timeline.lanes[laneIndex]
+            var parts: [VideoClip] = []
+            for clip in lane.clips {
+                if selection.contains(clip.id), let (left, right) = clip.split(at: cut - document.project.videoOffsetSeconds(forLane: lane.id)) {
+                    parts += [left, right]
+                    selection.remove(clip.id); selection.insert(right.id)
+                    if primary == clip.id { primary = right.id }
+                    changed = true
+                } else { parts.append(clip) }
             }
-            let clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
-            let seconds = seconds - document.project.videoOffsetSeconds(forLane: document.project.timeline.lanes[laneIndex].id)
-            guard seconds > clip.timelineStartSeconds + 0.05, seconds < clip.timelineStartSeconds + clip.durationSeconds - 0.05 else {
-                return
-            }
-            registerUndo(project: document.project)
-            guard let (firstClip, secondClip) = clip.split(at: seconds) else { return }
-            document.project.timeline.lanes[laneIndex].clips[clipIndex] = firstClip
-            document.project.timeline.lanes[laneIndex].clips.insert(secondClip, at: clipIndex + 1)
-            self.selectedClipId = secondClip.id
-            selectedMediaAssetId = secondClip.mediaAssetId
-            self.document = document
-            saveProject()
-            return
+            document.project.timeline.lanes[laneIndex].clips = parts
         }
+        guard changed else { return }
+        registerUndo(project: previous)
+        self.document = document
+        setRegionSelection(selection, primary: primary)
+        saveProject()
     }
 
     func canInsertAutomationMarker(at timelineSeconds: Double) -> Bool {
@@ -1190,33 +1250,22 @@ final class ProjectStore: ObservableObject {
         }
     }
 
-    func deleteSelectedClip() {
-        guard let selectedClipId else { return }
-        deleteClip(selectedClipId)
-    }
+    func deleteSelectedClip() { deleteRegions(selectedClipIDs) }
+    func deleteClip(_ clipId: String) { deleteRegions([clipId]) }
 
-    func deleteClip(_ clipId: String) {
+    private func deleteRegions(_ ids: Set<String>) {
         guard var document else { return }
-        var removedMediaAssetId: String?
-        for laneIndex in document.project.timeline.lanes.indices {
-            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == clipId }) else {
-                continue
-            }
-            registerUndo(project: document.project)
-            removedMediaAssetId = document.project.timeline.lanes[laneIndex].clips[clipIndex].mediaAssetId
-            document.project.timeline.lanes[laneIndex].clips.remove(at: clipIndex)
-            break
+        let removed = document.project.timeline.lanes.flatMap(\.clips).filter { ids.contains($0.id) }
+        guard !removed.isEmpty else { return }
+        registerUndo(project: document.project)
+        for index in document.project.timeline.lanes.indices {
+            document.project.timeline.lanes[index].clips.removeAll { ids.contains($0.id) }
         }
-        if let removedMediaAssetId, !isMediaAssetReferenced(removedMediaAssetId, in: document.project) {
-            document.project.media.removeAll { $0.id == removedMediaAssetId }
-        }
-        if selectedClipId == clipId {
-            selectedClipId = nil
-            if selectedMediaAssetId == removedMediaAssetId {
-                selectedMediaAssetId = nil
-            }
-        }
+        let mediaIDs = Set(removed.map(\.mediaAssetId))
+        let referenced = Set(document.project.timeline.lanes.flatMap(\.clips).map(\.mediaAssetId))
+        document.project.media.removeAll { mediaIDs.contains($0.id) && !referenced.contains($0.id) }
         self.document = document
+        reconcileSelection()
         saveProject()
     }
 
@@ -1318,9 +1367,7 @@ final class ProjectStore: ObservableObject {
         if let selectedMediaAssetId, !mediaIds.contains(selectedMediaAssetId) {
             self.selectedMediaAssetId = nil
         }
-        if let selectedClipId, !clipIds.contains(selectedClipId) {
-            self.selectedClipId = nil
-        }
+        setRegionSelection(selectedClipIDs.intersection(clipIds), primary: selectedClipId)
     }
 
     private func isMediaAssetReferenced(_ mediaAssetId: String, in project: CamOrderProject) -> Bool {
@@ -1365,26 +1412,20 @@ final class ProjectStore: ObservableObject {
     }
 
     private func editSelectedClipOnGrid(_ edit: (inout VideoClip, Double) -> Void) {
-        guard let selectedClipId else { return }
         guard var document else { return }
+        let previous = document.project
         for laneIndex in document.project.timeline.lanes.indices {
-            guard let clipIndex = document.project.timeline.lanes[laneIndex].clips.firstIndex(where: { $0.id == selectedClipId }) else {
-                continue
+            for clipIndex in document.project.timeline.lanes[laneIndex].clips.indices {
+                guard selectedClipIDs.contains(document.project.timeline.lanes[laneIndex].clips[clipIndex].id) else { continue }
+                edit(&document.project.timeline.lanes[laneIndex].clips[clipIndex], gridSeconds)
+                let mediaId = document.project.timeline.lanes[laneIndex].clips[clipIndex].mediaAssetId
+                document.project.timeline.lanes[laneIndex].clips[clipIndex].constrainDuration(toSourceDuration: document.project.media.first { $0.id == mediaId }?.durationSeconds)
             }
-            registerUndo(project: document.project)
-            let bpm = document.project.timeline.tempoBPM ?? 120
-            let division = document.project.timeline.gridDivision ?? .beat
-            let gridSeconds = max(0.001, 60.0 / max(1, bpm) * division.beats)
-            edit(&document.project.timeline.lanes[laneIndex].clips[clipIndex], gridSeconds)
-            let mediaId = document.project.timeline.lanes[laneIndex].clips[clipIndex].mediaAssetId
-            let mediaDuration = document.project.media.first { $0.id == mediaId }?.durationSeconds
-            document.project.timeline.lanes[laneIndex].clips[clipIndex].constrainDuration(toSourceDuration: mediaDuration)
-            let clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
-            document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
-            self.document = document
-            saveProject()
-            return
         }
+        guard document.project != previous else { return }
+        registerUndo(project: previous)
+        self.document = document
+        saveProject()
     }
 
     private func editClip(_ clipId: String, _ edit: (inout VideoClip) -> Void) {
@@ -1462,5 +1503,108 @@ final class ProjectStore: ObservableObject {
 private extension VideoClip {
     func containsTimelineSecond(_ second: Double) -> Bool {
         second >= timelineStartSeconds && second < timelineStartSeconds + durationSeconds
+    }
+}
+
+extension ProjectStore {
+    func cancelRegionEdit() { if regionEditPreview != nil { regionEditPreview = nil } }
+
+    func selectedRegions() -> [VideoClip] { project.timeline.lanes.flatMap(\.clips).filter { selectedClipIDs.contains($0.id) } }
+
+    func setRegionSelection(_ ids: Set<String>, primary: String? = nil) {
+        let nextPrimary = primary.flatMap { ids.contains($0) ? $0 : nil }
+            ?? project.timeline.lanes.flatMap(\.clips).first { ids.contains($0.id) }?.id
+        if selectedClipIDs != ids { selectedClipIDs = ids }
+        if primaryClipID != nextPrimary { primaryClipID = nextPrimary }
+        if let nextPrimary, let mediaID = clip(id: nextPrimary)?.mediaAssetId, selectedMediaAssetId != mediaID { selectedMediaAssetId = mediaID }
+    }
+
+    func selectRegion(_ id: String, extending: Bool = false, preserveGroup: Bool = false) {
+        if extending {
+            var next = selectedClipIDs
+            if next.contains(id) { next.remove(id) } else { next.insert(id) }
+            setRegionSelection(next, primary: next.contains(id) ? id : selectedClipId)
+        } else if preserveGroup, selectedClipIDs.contains(id) {
+            setRegionSelection(selectedClipIDs, primary: id)
+        } else { setRegionSelection([id], primary: id) }
+    }
+
+    func setSelectedRegionLayer(_ layer: Int?) {
+        guard layer == nil || (1...9).contains(layer!), var document else { return }
+        let previous = document.project
+        let order = min(Int.max - 1, document.project.timeline.lanes.flatMap(\.clips).compactMap(\.layerAssignmentOrder).max() ?? 0) + 1
+        for laneIndex in document.project.timeline.lanes.indices {
+            for clipIndex in document.project.timeline.lanes[laneIndex].clips.indices
+                where selectedClipIDs.contains(document.project.timeline.lanes[laneIndex].clips[clipIndex].id) {
+                document.project.timeline.lanes[laneIndex].clips[clipIndex].compositingLayer = layer
+                document.project.timeline.lanes[laneIndex].clips[clipIndex].layerAssignmentOrder = layer == nil ? nil : order
+            }
+        }
+        guard document.project != previous else { return }
+        registerUndo(project: previous)
+        self.document = document
+        saveProject()
+    }
+
+    /// One common delta keeps multi-camera edits aligned. The tightest source or
+    /// timeline limit in the selection constrains the entire gesture.
+    func regionEditDelta(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false) -> Double {
+        guard translation.isFinite, let anchor = clip(id: id) else { return 0 }
+        let selected = selectedClipIDs.contains(id) ? selectedRegions() : [anchor]
+        let presented = project.presentedClip(anchor)
+        let edge = presented.timelineStartSeconds + (kind == .right ? anchor.durationSeconds : 0)
+        let requested = snappedTime(edge + translation, bypass: bypassSnap) - edge
+        var minimum = -Double.infinity, maximum = Double.infinity
+        for clip in selected {
+            let start = project.presentedClip(clip).timelineStartSeconds
+            let minDuration = min(0.1, clip.durationSeconds)
+            switch kind {
+            case .move:
+                minimum = max(minimum, min(0, -start))
+            case .left:
+                minimum = max(minimum, min(0, max(-start, -clip.trimInSeconds)))
+                maximum = min(maximum, clip.durationSeconds - minDuration)
+            case .right:
+                minimum = max(minimum, minDuration - clip.durationSeconds)
+                if let sourceEnd = mediaAsset(for: clip)?.durationSeconds ?? clip.trimOutSeconds {
+                    maximum = min(maximum, max(0, sourceEnd - clip.trimInSeconds - (clip.playbackSyncOffsetSeconds ?? 0)) - clip.durationSeconds)
+                }
+            }
+        }
+        return max(minimum, min(maximum, requested))
+    }
+
+    func previewRegionEdit(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false) {
+        selectRegion(id, preserveGroup: true)
+        let preview = RegionEditPreview(ids: selectedClipIDs, kind: kind,
+            delta: regionEditDelta(anchor: id, kind: kind, translation: translation, bypassSnap: bypassSnap))
+        if regionEditPreview != preview { regionEditPreview = preview }
+    }
+
+    func commitRegionEdit(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false) {
+        defer { regionEditPreview = nil }
+        guard var document else { return }
+        selectRegion(id, preserveGroup: true)
+        let delta = regionEditDelta(anchor: id, kind: kind, translation: translation, bypassSnap: bypassSnap)
+        guard abs(delta) > 0.0000001 else { return }
+        let previous = document.project
+        for laneIndex in document.project.timeline.lanes.indices {
+            let laneID = document.project.timeline.lanes[laneIndex].id
+            for clipIndex in document.project.timeline.lanes[laneIndex].clips.indices {
+                var clip = document.project.timeline.lanes[laneIndex].clips[clipIndex]
+                guard selectedClipIDs.contains(clip.id) else { continue }
+                switch kind {
+                case .move: clip.timelineStartSeconds += delta
+                case .left: clip.trimLeftEdge(to: clip.timelineStartSeconds + delta,
+                    minimumTimelineStart: -document.project.videoOffsetSeconds(forLane: laneID))
+                case .right: clip.durationSeconds += delta
+                }
+                document.project.timeline.lanes[laneIndex].clips[clipIndex] = clip
+                document.project.timeline.durationSeconds = max(document.project.timeline.durationSeconds, clip.timelineStartSeconds + clip.durationSeconds)
+            }
+        }
+        registerUndo(project: previous)
+        self.document = document
+        saveProject()
     }
 }

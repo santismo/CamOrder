@@ -6,7 +6,8 @@ extern "C" AudioComponentPlugInInterface *CamOrderStudioAUFactory(const AudioCom
 struct TestHost {
     AudioUnit unit = nullptr;
     COBridge *bridge = nullptr;
-    double seconds = 0, renderSample = 0;
+    double seconds = 0, renderSample = 0, tempo = 120, beatZeroSeconds = 0;
+    bool musicalTimeAvailable = true;
     bool playing = false, recording = false, inputReady = false;
 };
 static OSStatus transport(void *context, Boolean *playing, Boolean *changed, Float64 *sample, Boolean *cycling, Float64 *start, Float64 *end) {
@@ -18,6 +19,17 @@ static OSStatus transport(void *context, Boolean *playing, Boolean *changed, Flo
     if (cycling) *cycling = false;
     if (start) *start = 0; if (end) *end = 0;
     return noErr;
+}
+static OSStatus beatAndTempo(void *context, Float64 *beat, Float64 *tempo) {
+    auto &host = *(TestHost *)context;
+    if (!host.musicalTimeAvailable || !host.inputReady) return kAudioUnitErr_CannotDoInCurrentContext;
+    if (beat) *beat = (host.seconds - host.beatZeroSeconds) * host.tempo / 60;
+    if (tempo) *tempo = host.tempo;
+    return noErr;
+}
+void COTestHostSetTempo(void *value, double tempo, double beatZeroSeconds, bool available) {
+    auto &host = *(TestHost *)value;
+    host.tempo = tempo; host.beatZeroSeconds = beatZeroSeconds; host.musicalTimeAvailable = available;
 }
 static OSStatus input(void *context, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *, UInt32, UInt32 frames, AudioBufferList *buffers) {
     ((TestHost *)context)->inputReady = true;
@@ -31,12 +43,12 @@ static OSStatus input(void *context, AudioUnitRenderActionFlags *flags, const Au
 void *COTestHostCreate() {
     auto *host = new TestHost;
     AudioComponentDescription description = {kAudioUnitType_Effect, 'CmSt', 'Sntm', 0, 0};
-    static auto component = AudioComponentRegister(&description, CFSTR("CamOrder Session Test"), 0x502, CamOrderStudioAUFactory);
+    static auto component = AudioComponentRegister(&description, CFSTR("CamOrder Session Test"), 0x600, CamOrderStudioAUFactory);
     if (!component || AudioComponentInstanceNew(component, &host->unit)) abort();
     AudioStreamBasicDescription format = {48000, kAudioFormatLinearPCM, kAudioFormatFlagsNativeFloatPacked | kAudioFormatFlagIsNonInterleaved, 4, 1, 4, 2, 32, 0};
     if (AudioUnitSetProperty(host->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &format, sizeof(format)) ||
         AudioUnitSetProperty(host->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &format, sizeof(format))) abort();
-    HostCallbackInfo callbacks = {}; callbacks.hostUserData = host; callbacks.transportStateProc = transport;
+    HostCallbackInfo callbacks = {}; callbacks.hostUserData = host; callbacks.transportStateProc = transport; callbacks.beatAndTempoProc = beatAndTempo;
     AURenderCallbackStruct render = {input, host};
     AudioUnitSetProperty(host->unit, kAudioUnitProperty_HostCallbacks, kAudioUnitScope_Global, 0, &callbacks, sizeof(callbacks));
     AudioUnitSetProperty(host->unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &render, sizeof(render));

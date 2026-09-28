@@ -13,7 +13,7 @@ typedef struct {
     uint64_t renderCount, callbackFailures;
     double lastAttemptSeconds;
     int32_t callbackStatus;
-    uint32_t callbackVersion;
+    uint32_t callbackVersion, musicalTimeValid;
 } COTransport;
 enum { kCamOrderBridgeProperty = 64000 };
 void CORetainBridge(COBridge *bridge);

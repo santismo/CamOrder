@@ -4,6 +4,40 @@ import AppKit
 @testable import CamOrderStudioCore
 
 final class MovieExportTests: XCTestCase {
+    @MainActor
+    func testLiveCameraCutsRenderTheChosenLaneWithIndependentOffsets() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try await makeMovie(at: folder.appendingPathComponent("red.mov"), red: true)
+        try await makeMovie(at: folder.appendingPathComponent("blue.mov"), red: false)
+        var project = CamOrderProject.empty(name: "Live camera edit")
+        project.exportSettings.canvasWidth = 64; project.exportSettings.canvasHeight = 64
+        project.exportSettings.audioMode = .muteAll
+        project.sync.videoOffsetMS = -82
+        project.media = [MediaAsset(id: "red", kind: .video, displayName: "Red", relativePath: "red.mov"),
+            MediaAsset(id: "blue", kind: .video, displayName: "Blue", relativePath: "blue.mov")]
+        for index in 0..<2 {
+            project.timeline.lanes[index].videoOffsetMS = Double(index * 42)
+            let lane = project.timeline.lanes[index].id
+            let start = 10 - project.videoOffsetSeconds(forLane: lane)
+            let asset = project.media[index]
+            project.timeline.lanes[index].clips = [VideoClip(clipId: lane, mediaAssetId: asset.id, videoFile: asset.relativePath,
+                armedLaneId: lane, logicStartTimecode: .from(seconds: start, frameRate: .fps30), logicStartSeconds: start,
+                durationSeconds: 0.8, frameRate: .fps30)]
+        }
+        XCTAssertNotNil(project.switchCamera(toLaneID: "lane_2", at: 10.25))
+        XCTAssertNotNil(project.switchCamera(toLaneID: "lane_1", at: 10.55))
+        let output = folder.appendingPathComponent("switched.mov")
+        let engine = RenderExportEngine()
+        try await engine.export(project: project, from: folder, to: output, range: MovieExportRange(startSeconds: 10, endSeconds: 10.8))
+        let movie = AVURLAsset(url: output)
+        XCTAssertGreaterThan(try pixel(movie, at: 0.1).red, 0.8)
+        XCTAssertGreaterThan(try pixel(movie, at: 0.4).blue, 0.8)
+        XCTAssertGreaterThan(try pixel(movie, at: 0.7).red, 0.8)
+        XCTAssertEqual(engine.progress, 1)
+    }
+
     // Real encoded frames catch invalid composition instructions, black-gap regressions,
     // trimming errors and accidental source replacement; not just model round-trips.
     @MainActor

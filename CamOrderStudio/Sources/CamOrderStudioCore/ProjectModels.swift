@@ -68,6 +68,7 @@ public struct Timeline: Codable, Equatable, Sendable {
     public var gridDivision: BeatGridDivision?
     public var gridOriginSeconds: Double?
     public var snapToGrid: Bool?
+    public var snapLiveCutsToGrid: Bool?
 
     public init(durationSeconds: Double = 0, lanes: [VideoLane] = [], tempoBPM: Double? = 120, gridDivision: BeatGridDivision? = .beat) {
         self.durationSeconds = durationSeconds

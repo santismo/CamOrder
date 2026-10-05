@@ -18,10 +18,10 @@ final class ProjectStore: ObservableObject {
 
     var isHosted = false
     let syncCalculator = SyncCalculatorModel()
+    let exportController = ProjectExportController()
     var framingPlayheadSeconds: (() -> Double)?
     private var framingEditTime: (clipID: String, localSeconds: Double)?
     var onDocumentChange: (() -> Void)?
-    @Published var lastExportURL: URL?
     @Published var document: ProjectDocument?
     @Published var selectedMediaAssetId: String?
     @Published private(set) var selectedClipIDs = Set<String>()
@@ -32,6 +32,7 @@ final class ProjectStore: ObservableObject {
     }
     @Published private(set) var hostGrid: MusicalGrid?
     @Published private(set) var regionEditPreview: RegionEditPreview?
+    @Published private(set) var liveCutMessage: String?
 
     enum RegionEditKind { case move, left, right }
     struct RegionEditPreview: Equatable {
@@ -352,12 +353,16 @@ final class ProjectStore: ObservableObject {
         saveProject()
     }
 
-    func handleProjectShortcut(_ event: NSEvent, at seconds: Double) -> Bool {
+    func handleProjectShortcut(_ event: NSEvent, at seconds: Double, isPlaying: Bool = false) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
         if modifiers.isEmpty {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "t", "c": if !event.isARepeat { cutSelectedClip(at: seconds) }; return true
             case let key? where key.count == 1 && Int(key) != nil:
+                if isPlaying {
+                    if !event.isARepeat, let number = Int(key), (1...9).contains(number) { switchCamera(number: number, at: seconds) }
+                    return true
+                }
                 if !event.isARepeat { setSelectedRegionLayer(Int(key) == 0 ? nil : Int(key)) }; return true
             default: break
             }
@@ -1507,6 +1512,52 @@ private extension VideoClip {
 }
 
 extension ProjectStore {
+    var snapLiveCutsToGrid: Bool { project.timeline.snapLiveCutsToGrid ?? true }
+
+    func setSnapLiveCutsToGrid(_ value: Bool) {
+        guard document != nil else { return }
+        project.timeline.snapLiveCutsToGrid = value
+        saveProject()
+    }
+
+    func switchCamera(number: Int, at seconds: Double) {
+        guard var document, (1...9).contains(number), seconds.isFinite else { return }
+        guard !hasCaptureActivity, !hasArmedLane else {
+            liveCutMessage = "Finish recording and disarm the lanes before live editing."
+            return
+        }
+        guard document.project.timeline.lanes.indices.contains(number - 1) else {
+            liveCutMessage = "No lane \(number)."
+            return
+        }
+        let lane = document.project.timeline.lanes[number - 1]
+        let cut = max(0, snapLiveCutsToGrid ? musicalGrid.snapped(seconds, division: gridDivision) : seconds)
+        let before = document.project
+        guard let region = document.project.switchCamera(toLaneID: lane.id, at: cut) else {
+            liveCutMessage = "Lane \(number) has no visible video at this cut."
+            return
+        }
+        registerUndo(project: before)
+        self.document = document
+        selectRegion(region)
+        liveCutMessage = String(format: "Camera %d · %@ · %.3f s", number, lane.name, cut)
+        saveProject()
+    }
+
+    func moveLane(_ id: String, relativeTo targetID: String, after: Bool) {
+        guard var document, id != targetID,
+              let source = document.project.timeline.lanes.firstIndex(where: { $0.id == id }),
+              document.project.timeline.lanes.contains(where: { $0.id == targetID }) else { return }
+        let before = document.project
+        let lane = document.project.timeline.lanes.remove(at: source)
+        let target = document.project.timeline.lanes.firstIndex(where: { $0.id == targetID })!
+        document.project.timeline.lanes.insert(lane, at: target + (after ? 1 : 0))
+        guard document.project != before else { return }
+        registerUndo(project: before)
+        self.document = document
+        saveProject()
+    }
+
     func cancelRegionEdit() { if regionEditPreview != nil { regionEditPreview = nil } }
 
     func selectedRegions() -> [VideoClip] { project.timeline.lanes.flatMap(\.clips).filter { selectedClipIDs.contains($0.id) } }

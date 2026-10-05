@@ -417,7 +417,7 @@ func createCamOrderView(_ pointer: OpaquePointer) -> UnsafeMutableRawPointer {
         view.sizingOptions = []
         view.onProjectCommand = { [weak session] event in
             guard let session else { return false }
-            return session.store.handleProjectShortcut(event, at: session.sync.editorSeconds)
+            return session.store.handleProjectShortcut(event, at: session.sync.editorSeconds, isPlaying: session.sync.isTransportRolling)
         }
         resizeTarget.view = view
         view.frame = NSRect(x: 0, y: 0, width: 1280, height: 820)

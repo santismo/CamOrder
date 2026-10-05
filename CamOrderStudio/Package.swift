@@ -29,6 +29,10 @@ let package = Package(
         .testTarget(
             name: "CamOrderStudioCoreTests",
             dependencies: ["CamOrderStudioCore"]
+        ),
+        .testTarget(
+            name: "CamOrderStudioAppTests",
+            dependencies: ["CamOrderStudioApp", "CamOrderStudioCore"]
         )
     ]
 )

@@ -50,6 +50,7 @@ final class CaptureHelperDelegate: NSObject, NSApplicationDelegate {
         case "refresh": engine.refreshDevices()
         case "select": if let id = command.value { engine.selectDevice(id: id) }
         case "preview": engine.startPreview()
+        case "chooseWindow": engine.chooseWindow()
         case "stopPreview": engine.stopPreview()
         case "crop":
             if let rect = command.crop, rect.count == 4 { engine.setScreenCropRect(CGRect(x: rect[0], y: rect[1], width: rect[2], height: rect[3])) }

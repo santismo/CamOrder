@@ -25,6 +25,9 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
     private var remote: CaptureHelperClient?
     private var remoteRecordingURL: URL?
     private let worker: CaptureWriter
+    private var windowCapture: WindowCaptureSession?
+    private var localWindowReceiver: PreviewReceiver?
+    private var localWindowPreviewFolder: URL?
     private var startingPreview = false
     private var previewConfigurationRevision: UInt64 = 0
     private var observers: [NSObjectProtocol] = []
@@ -98,7 +101,9 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
         observers.forEach(NotificationCenter.default.removeObserver)
         let worker = worker
         if let remote { Task { @MainActor in remote.shutdown() } }
+        if let windowCapture { Task { @MainActor in windowCapture.stop() } }
         worker.queue.async { worker.finish(); worker.session.stopRunning() }
+        if let localWindowPreviewFolder { try? FileManager.default.removeItem(at: localWindowPreviewFolder) }
     }
     public func refreshDevices() {
         if let remote { remote.send(CaptureCommand("refresh")); return }
@@ -119,6 +124,9 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
             CameraDeviceInfo(id: "screen:main", displayName: "Main display", kind: .screen),
             CameraDeviceInfo(id: "screen:region", displayName: "Screen region (main display)", kind: .screen)
         ]
+        if #available(macOS 14.0, *) {
+            availableDevices.append(CameraDeviceInfo(id: "window:picker", displayName: "Window (choose…)", kind: .window))
+        }
         if selectedDeviceID == nil { selectedDeviceID = availableDevices.first?.id }
     }
     public func selectDevice(id: String) {
@@ -147,6 +155,13 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
         previewWanted = true
         if let remote { remote.send(CaptureCommand("preview")); return }
         guard !isRecording, !isFinishingRecording, !startingPreview, let id = selectedDeviceID else { return }
+        if id == "window:picker" {
+            worker.queue.async { [worker] in worker.session.stopRunning() }
+            if #available(macOS 14.0, *) { prepareWindowCapture().resume() }
+            else { lastErrorMessage = "Window capture requires macOS 14 or later." }
+            return
+        }
+        windowCapture?.stop()
         startingPreview = true
         isPreviewing = false
         let configurationRevision = previewConfigurationRevision
@@ -155,7 +170,7 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
                 startingPreview = false
                 if previewWanted, previewConfigurationRevision != configurationRevision { startPreview() }
             }
-            if id.hasPrefix("screen:") || id.hasPrefix("window:") {
+            if id.hasPrefix("screen:") {
                 guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
                     lastErrorMessage = "Allow Screen Recording for CamOrder Capture (or CamOrder Studio when running standalone) in System Settings → Privacy & Security, then reopen the host."
                     return
@@ -181,7 +196,8 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
                     catch { continuation.resume(returning: error.localizedDescription) }
                 }
             }
-            isPreviewing = result == nil && previewWanted && previewConfigurationRevision == configurationRevision
+            guard previewConfigurationRevision == configurationRevision else { return }
+            isPreviewing = result == nil && previewWanted
             lastErrorMessage = result
             if !previewWanted { worker.queue.async { [worker] in worker.session.stopRunning() } }
         }
@@ -192,8 +208,45 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
         previewFrames.clear()
         if let remote { remote.send(CaptureCommand("stopPreview")); isPreviewing = false; return }
         guard !isRecording, !isFinishingRecording else { return }
+        windowCapture?.stop()
         worker.queue.async { [worker] in worker.session.stopRunning() }
         isPreviewing = false
+    }
+    public func chooseWindow() {
+        guard selectedDeviceID == "window:picker", !isRecording, !isFinishingRecording else { return }
+        previewWanted = true
+        if let remote { remote.send(CaptureCommand("chooseWindow")); return }
+        if #available(macOS 14.0, *) { prepareWindowCapture().choose() }
+        else { lastErrorMessage = "Window capture requires macOS 14 or later." }
+    }
+    @available(macOS 14.0, *)
+    private func prepareWindowCapture() -> WindowCaptureSession {
+        if let windowCapture { return windowCapture }
+        let capture = WindowCapture(writer: worker, canChange: { [weak self] in
+            guard let self else { return false }
+            return self.previewWanted && self.selectedDeviceID == "window:picker" && !self.isRecording && !self.isFinishingRecording
+        }, state: { [weak self] ready, message in
+            guard let self, self.selectedDeviceID == "window:picker", self.previewWanted else { return }
+            self.isPreviewing = ready
+            self.lastErrorMessage = message
+            if !ready { self.previewFrames.clear(); self.stopRecording() }
+        })
+        windowCapture = capture
+        // The standalone app normally uses AVCaptureVideoPreviewLayer. Window
+        // capture uses the same bounded image mailbox as the AU's helper instead.
+        if !hasPreviewDestination {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("camorder-window-preview-" + UUID().uuidString)
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                localWindowPreviewFolder = folder
+                let url = folder.appendingPathComponent("preview.frames")
+                setPreviewImageDestination(url)
+                localWindowReceiver = PreviewReceiver(url: url) { [weak self] image in
+                    MainActor.assumeIsolated { self?.previewFrames.display(image) }
+                }
+            } catch { lastErrorMessage = error.localizedDescription }
+        }
+        return capture
     }
     public func startRecording(to url: URL) throws {
         guard isPreviewing, !startingPreview, !isRecording, !isFinishingRecording else {
@@ -217,7 +270,9 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
         if let remote { remote.send(CaptureCommand("stop")); return }
         worker.queue.async { [worker] in worker.finish() }
     }
+    private var hasPreviewDestination = false
     public func setPreviewImageDestination(_ url: URL) {
+        hasPreviewDestination = true
         worker.queue.async { [worker] in worker.previewPublisher = try? PreviewPublisher(url: url) }
     }
     public func reportCaptureFailure(_ message: String, url: URL) {
@@ -248,6 +303,9 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private var firstTime: CMTime?
     private var lastTime: CMTime?
     private var droppedFrames = 0
+    private var windowToken: UUID?
+    private var windowSample: CMSampleBuffer?
+    private var windowTimer: DispatchSourceTimer?
     var previewPublisher: PreviewPublisher?
 
     func configure(id: String, crop: CGRect?) throws {
@@ -256,11 +314,11 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         defer { session.commitConfiguration() }
         session.inputs.forEach(session.removeInput)
         let captureInput: AVCaptureInput
-        if id.hasPrefix("screen:") || id.hasPrefix("window:") {
+        if id.hasPrefix("screen:") {
             guard let screen = AVCaptureScreenInput(displayID: CGMainDisplayID()) else { throw CaptureFailure("Screen capture is unavailable.") }
             screen.minFrameDuration = CMTime(value: 1, timescale: 30)
             screen.capturesCursor = true
-            if id == "screen:region" || id.hasPrefix("window:"), let crop { screen.cropRect = crop }
+            if id == "screen:region", let crop { screen.cropRect = crop }
             captureInput = screen
         } else {
             guard let device = AVCaptureDevice(uniqueID: id) else { throw CaptureFailure("The selected camera was disconnected. Reconnect it, refresh inputs, and try again.") }
@@ -282,6 +340,15 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     func begin(url: URL) {
         destination = url
         firstTime = nil; lastTime = nil; droppedFrames = 0
+        if windowToken != nil {
+            // ScreenCaptureKit sends idle notifications for static windows. Repeat
+            // the latest complete frame on the host clock only while recording.
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now(), repeating: 1.0 / 30.0, leeway: .milliseconds(1))
+            timer.setEventHandler { [weak self] in self?.writeWindowFrame() }
+            windowTimer = timer
+            timer.resume()
+        }
         // A disconnected or silent device must not remain 'Recording' indefinitely.
         queue.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.destination == url, self.firstTime == nil else { return }
@@ -292,8 +359,38 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         if destination != nil { droppedFrames += 1 }
     }
     func captureOutput(_ output: AVCaptureOutput, didOutput sample: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard windowToken == nil else { return }
         guard CMSampleBufferDataIsReady(sample), let pixel = CMSampleBufferGetImageBuffer(sample) else { return }
         previewPublisher?.offer(pixel, timestamp: CMSampleBufferGetPresentationTimeStamp(sample).seconds)
+        appendVideoSample(sample, synchronizationClock: session.synchronizationClock)
+    }
+    func beginWindowStream(token: UUID) {
+        session.stopRunning()
+        windowToken = token
+        windowSample = nil
+    }
+    @discardableResult func receiveWindowFrame(_ sample: CMSampleBuffer, token: UUID) -> Bool {
+        guard token == windowToken, CMSampleBufferDataIsReady(sample), let pixel = CMSampleBufferGetImageBuffer(sample) else { return false }
+        windowSample = sample
+        previewPublisher?.offer(pixel, timestamp: CMClockGetTime(CMClockGetHostTimeClock()).seconds)
+        return true
+    }
+    func endWindowStream(token: UUID) {
+        guard windowToken == token else { return }
+        windowToken = nil; windowSample = nil
+        if destination != nil { finish(error: "Window sharing stopped before the take ended.") }
+    }
+    private func writeWindowFrame() {
+        guard destination != nil, let sample = windowSample else { return }
+        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30),
+                                       presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var timed: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: sample, sampleTimingEntryCount: 1,
+                                                    sampleTimingArray: &timing, sampleBufferOut: &timed) == noErr, let timed else { return }
+        appendVideoSample(timed, synchronizationClock: nil)
+    }
+    private func appendVideoSample(_ sample: CMSampleBuffer, synchronizationClock: CMClock?) {
+        guard let pixel = CMSampleBufferGetImageBuffer(sample) else { return }
         guard let url = destination else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sample)
         guard time.isValid, time.isNumeric else { return }
@@ -317,13 +414,14 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
             guard input.append(sample) else { throw writer.error ?? CaptureFailure("Video encoding failed.") }
             if firstTime == nil {
                 firstTime = time
-                let hostTime = session.synchronizationClock.map { CMSyncConvertTime(time, from: $0, to: CMClockGetHostTimeClock()) } ?? time
+                let hostTime = synchronizationClock.map { CMSyncConvertTime(time, from: $0, to: CMClockGetHostTimeClock()) } ?? time
                 onStarted?(hostTime.seconds)
             }
             lastTime = time
         } catch { finish(error: error.localizedDescription) }
     }
     func finish(error: String? = nil) {
+        windowTimer?.cancel(); windowTimer = nil
         guard let url = destination else { return }
         destination = nil
         let writer = self.writer, input = self.input

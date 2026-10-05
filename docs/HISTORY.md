@@ -2,7 +2,7 @@
 
 [← Current CamOrder Studio plug-in](../README.md)
 
-CamOrder's current focus is **CamOrder Studio AU 0.7.1**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.7.1) or read its [guide](../CamOrderStudio/README-AU.md).
+CamOrder's current focus is **CamOrder Studio AU 0.8.0**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.8.0) or read its [guide](../CamOrderStudio/README-AU.md).
 
 **Older versions are still available, but they are buggy, unsupported historical builds.** They may contain recording, transport, editing or export problems fixed in later versions. Keep a separate copy of your project before opening it with an older version. Their original instructions describe their behavior at the time and do not replace the current guide.
 
@@ -12,6 +12,7 @@ The [historical AU archive](https://github.com/santismo/CamOrder/releases/tag/le
 
 | Version | Development stage | Download |
 | --- | --- | --- |
+| 0.7.1 | Cross-lane region moves and recorded-position recovery. Superseded by preview reconnection fixes, visible screen-region controls and window capture. | [0.7.1 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.7.1) |
 | 0.7.0 | Live multicamera switching, lane reordering, selected-region preview and bottom controls. Superseded by cross-lane region moves and saved recording positions. | [0.7.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.7.0) |
 | 0.6.0 | Host-tempo snapping, grouped region editing and explicit output layers. Superseded by live multicamera cuts, lane reordering and export status. | [0.6.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.6.0) |
 | 0.5.2 | Visible Save, draggable region edges and single-region copy/paste. Superseded by host-tempo snapping, grouped editing and explicit output layers. | [0.5.2 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.5.2) |

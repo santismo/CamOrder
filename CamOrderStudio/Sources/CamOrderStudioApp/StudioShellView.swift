@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.7.0").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.7.1").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -1827,13 +1827,13 @@ private struct TimelineView: View {
                                                     seekTimelineIfEditing(locationX: CGFloat(seconds * secondsToPixels))
                                                 },
                                                 onBeginTrim: { store.selectRegion(clip.id, preserveGroup: true) },
-                                                onPreview: { kind, delta in
+                                                onPreview: { kind, delta, laneDelta in
                                                     store.previewRegionEdit(anchor: clip.id, kind: kind, translation: delta,
-                                                        bypassSnap: NSEvent.modifierFlags.contains(.option))
+                                                        bypassSnap: NSEvent.modifierFlags.contains(.option), laneDelta: laneDelta)
                                                 },
-                                                onCommit: { kind, delta in
+                                                onCommit: { kind, delta, laneDelta in
                                                     store.commitRegionEdit(anchor: clip.id, kind: kind, translation: delta,
-                                                        bypassSnap: NSEvent.modifierFlags.contains(.option))
+                                                        bypassSnap: NSEvent.modifierFlags.contains(.option), laneDelta: laneDelta)
                                                 }
                                             )
                                                 .offset(x: clip.timelineStartSeconds * secondsToPixels)
@@ -1853,6 +1853,21 @@ private struct TimelineView: View {
                                                             store.selectRegion(clip.id, preserveGroup: true); store.setSelectedRegionLayer(nil)
                                                         }
                                                     }
+                                                    Menu("Move to Lane") {
+                                                        ForEach(Array(store.project.timeline.lanes.enumerated()), id: \.element.id) { index, destination in
+                                                            Button("\(index + 1) · \(destination.name)") {
+                                                                store.moveRegions(anchor: clip.id, toLaneID: destination.id)
+                                                            }
+                                                            .disabled(destination.id == lane.id || store.moveRegionLaneDelta(anchor: clip.id, toLaneID: destination.id) == nil)
+                                                        }
+                                                    }
+                                                    Button("Return to Recorded Position") {
+                                                        store.returnToRecordedPosition(anchor: clip.id)
+                                                    }
+                                                    .disabled(!store.canReturnToRecordedPosition(anchor: clip.id))
+                                                    .help(store.canReturnToRecordedPosition(anchor: clip.id)
+                                                        ? "Restore the selection’s recorded timing, keeping trims and current sync offsets."
+                                                        : "Original recording positions are unavailable for older recordings or imported videos in this selection.")
                                                     Button("Copy Selection") {
                                                         store.selectRegion(clip.id, preserveGroup: true)
                                                         store.copySelectedRegion()
@@ -1903,6 +1918,7 @@ private struct TimelineView: View {
                                                 .offset(x: (pending.startSeconds + offset) * secondsToPixels)
                                         }
                                     }
+                                    .zIndex(regionDragZIndex(for: lane))
                                 }
                                 if store.project.audio.masteredAudioFile != nil { Rectangle()
                                     .fill(Color.accentColor.opacity(0.12))
@@ -2046,6 +2062,15 @@ private struct TimelineView: View {
             return nil
         }
         return url
+    }
+
+    private func regionDragZIndex(for lane: VideoLane) -> Double {
+        guard let preview = store.regionEditPreview, preview.kind == .move,
+              lane.clips.contains(where: { preview.ids.contains($0.id) }),
+              let index = store.project.timeline.lanes.firstIndex(where: { $0.id == lane.id }) else { return 0 }
+        // A group's ghosts must sit above the backgrounds of the other source
+        // rows they cross, in either direction, without reparenting native grips.
+        return Double(preview.laneDelta >= 0 ? store.project.timeline.lanes.count - index : index + 1)
     }
 
     private func laneFill(for lane: VideoLane) -> Color {
@@ -2454,8 +2479,8 @@ private struct ClipBlock: View {
     let onClick: () -> Void
     let onMarker: (Double) -> Void
     let onBeginTrim: () -> Void
-    let onPreview: (ProjectStore.RegionEditKind, Double) -> Void
-    let onCommit: (ProjectStore.RegionEditKind, Double) -> Void
+    let onPreview: (ProjectStore.RegionEditKind, Double, Int) -> Void
+    let onCommit: (ProjectStore.RegionEditKind, Double, Int) -> Void
 
     private func delta(_ kind: ProjectStore.RegionEditKind) -> Double {
         guard let preview, preview.ids.contains(clip.id), preview.kind == kind else { return 0 }
@@ -2506,8 +2531,8 @@ private struct ClipBlock: View {
             .background(.black.opacity(videoURL == nil ? 0.14 : 0.44), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .allowsHitTesting(false)
             RegionMoveHandle(clipID: clip.id, onSelect: onSelect, onClick: onClick,
-                onChange: { onPreview(.move, seconds(for: $0)) },
-                onEnd: { onCommit(.move, seconds(for: $0)) })
+                onChange: { onPreview(.move, abs($0.width) < 3 ? 0 : seconds(for: $0.width), Int(($0.height / 64).rounded())) },
+                onEnd: { onCommit(.move, abs($0.width) < 3 ? 0 : seconds(for: $0.width), Int(($0.height / 64).rounded())) })
                 .frame(width: width, height: 40)
             ForEach(visibleAutomationMarkers) { marker in
                 automationMarkerView
@@ -2528,20 +2553,21 @@ private struct ClipBlock: View {
         }
         .overlay(alignment: .leading) {
             RegionTrimHandle(clipID: clip.id, left: true, selected: isSelected, onSelect: onBeginTrim,
-                onChange: { onPreview(.left, seconds(for: $0)) },
-                onEnd: { onCommit(.left, seconds(for: $0)) })
+                onChange: { onPreview(.left, seconds(for: $0), 0) },
+                onEnd: { onCommit(.left, seconds(for: $0), 0) })
                 .frame(width: 14, height: 40).offset(x: leftGripOffset)
         }
         .overlay(alignment: .trailing) {
             RegionTrimHandle(clipID: clip.id, left: false, selected: isSelected, onSelect: onBeginTrim,
-                onChange: { onPreview(.right, seconds(for: $0)) },
-                onEnd: { onCommit(.right, seconds(for: $0)) })
+                onChange: { onPreview(.right, seconds(for: $0), 0) },
+                onEnd: { onCommit(.right, seconds(for: $0), 0) })
                 .frame(width: 14, height: 40).offset(x: rightGripOffset)
         }
         // Keep exterior grips inside the parent hit-test bounds without changing
         // the region's actual timeline width or source time.
         .padding(.horizontal, 28)
-        .offset(x: (delta(.move) + leftDelta) * secondsToPixels - 28)
+        .offset(x: (delta(.move) + leftDelta) * secondsToPixels - 28,
+                y: preview?.kind == .move && preview?.ids.contains(clip.id) == true ? CGFloat(preview?.laneDelta ?? 0) * 64 : 0)
     }
 
     private var visibleAutomationMarkers: [ClipAutomationMarker] {

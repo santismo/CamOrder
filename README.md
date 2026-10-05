@@ -39,6 +39,7 @@ Webcams, macOS-exposed iPhone/Continuity Camera inputs, and main-display screen 
 - A dark, freely resizable editor with adjustable Main Stage, Live Inputs and timeline panels. Inspector, Media and Sync controls open when needed.
 - Undo deleted regions while armed, commit lane names with Return or an outside click, and pinch to zoom a timeline that follows the playhead.
 - A visible **Save** button and **⌘S**, larger draggable region edges, and **⌘C / ⌘V** to repeat edited regions at the playhead. Copy/paste retains trims, framing and animation and supports Undo.
+- Drag regions between lanes, or right-click **Move to Lane**, while keeping their visible timing and sync. **Return to Recorded Position** restores the recorded timing of new takes without discarding trims or automation; both support Undo. Older recordings without a saved recording anchor cannot use Return.
 - **Edit to Logic’s beat:** the detected host tempo and beat position drive the grid. Snap cuts, moves and edge trims to beats or subdivisions; Option-drag temporarily bypasses snapping.
 - **Shift-click** regions to select several camera angles. **T** or the scissors cuts them together; drag or trim the group with one Undo step. Copy, paste and delete support groups too.
 - **Switch cameras as the music plays:** after recording, play the footage with CamOrder focused and press **1–9** for the first nine lanes. Each switch cuts all regions crossing that time and brings the chosen camera forward. Choose **Live cuts: Free / Snap** for exact or beat-snapped switching; Undo reverses the whole switch.
@@ -73,6 +74,6 @@ auval -v aufx CmSt Sntm
 
 To build the DMG and native installer from the verified component, run `python3 Scripts/package-installer.py`. See [installer packaging and verification](docs/INSTALLER.md).
 
-Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.7.0.md) for the tests and their limits.
+Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.7.1.md) for the tests and their limits.
 
 CamOrder is [MIT licensed](LICENSE). The vendored AudioUnitSDK has its [own license](CamOrderStudio/Vendor/AudioUnitSDK/LICENSE.txt).

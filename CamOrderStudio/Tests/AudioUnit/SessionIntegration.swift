@@ -216,6 +216,7 @@ struct SessionIntegration {
         try runEditingRegression()
         try runRegionClipboardRegression()
         try runMusicalRegionEditingRegression()
+        try runLiveEditingRegression()
         try runSyncCalculatorRegression()
         // Visual fixture: actual recorded media and a 4K canvas in the small editor.
         session.store.unarmAllLanes()
@@ -299,7 +300,7 @@ struct SessionIntegration {
             window.setContentSize(NSSize(width: 1280, height: 820))
             view.setFrameSize(NSSize(width: 1280, height: 820))
             window.center()
-            window.title = "CamOrder Studio 0.6.0"
+            window.title = "CamOrder Studio 0.7.0"
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
             view.layoutSubtreeIfNeeded()
             let fullScreenshot = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("editor-full-session.png")
@@ -311,6 +312,8 @@ struct SessionIntegration {
                 try bitmap.representation(using: .png, properties: [:])?.write(to: fullScreenshot)
             }
             try runEditorInteractionRegression(view: view, window: window, session: session, host: host)
+            try runLiveEditorRegression(view: view, window: window, session: session, host: host,
+                screenshots: URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent())
             window.orderOut(nil)
         }
         session.close()

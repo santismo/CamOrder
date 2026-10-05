@@ -41,9 +41,9 @@ extension VideoClip {
         max(0, trimInSeconds + timelineSeconds - timelineStartSeconds + syncOffset)
     }
 
-    public func split(at seconds: Double) -> (VideoClip, VideoClip)? {
+    public func split(at seconds: Double, minimumDuration: Double = 0.05) -> (VideoClip, VideoClip)? {
         let elapsed = seconds - timelineStartSeconds
-        guard elapsed > 0.05, elapsed < durationSeconds - 0.05 else { return nil }
+        guard seconds.isFinite, elapsed > minimumDuration, elapsed < durationSeconds - minimumDuration else { return nil }
         var first = self
         first.durationSeconds = elapsed
         var second = self
@@ -111,8 +111,72 @@ extension VideoClip {
     }
 }
 
+/// Identity follows the source in a lane, so a cut or layer change does not
+/// tear down a decoder that is already playing the same movie continuously.
+public struct PlaybackSlot: Identifiable {
+    public struct ID: Hashable {
+        public let laneID: String
+        public let mediaID: String
+        public let occurrence: Int
+    }
+    public let id: ID
+    public let clip: VideoClip
+
+    public static func slots(for clips: [VideoClip]) -> [PlaybackSlot] {
+        var counts: [String: [String: Int]] = [:]
+        return clips.map { clip in
+            let occurrence = counts[clip.armedLaneId]?[clip.mediaAssetId] ?? 0
+            counts[clip.armedLaneId, default: [:]][clip.mediaAssetId] = occurrence + 1
+            return PlaybackSlot(id: ID(laneID: clip.armedLaneId, mediaID: clip.mediaAssetId, occurrence: occurrence), clip: clip)
+        }
+    }
+}
+
 
 extension CamOrderProject {
+    /// Split every region crossing this presentation time, then promote the
+    /// chosen camera's right-hand region. Existing later edits stay intact.
+    /// Returns the foreground region ID; invalid/empty camera choices do nothing.
+    @discardableResult
+    public mutating func switchCamera(toLaneID laneID: String, at seconds: Double) -> String? {
+        guard seconds.isFinite, seconds >= 0,
+              let chosen = playbackClips(at: seconds).first(where: { $0.armedLaneId == laneID }),
+              media.contains(where: { $0.id == chosen.mediaAssetId }) else { return nil }
+        let order = min(Int.max - 1, timeline.lanes.flatMap(\.clips).compactMap(\.layerAssignmentOrder).max() ?? 0) + 1
+        var selectedID: String?
+        for laneIndex in timeline.lanes.indices {
+            let offset = videoOffsetSeconds(forLane: timeline.lanes[laneIndex].id)
+            let local = seconds - offset
+            timeline.lanes[laneIndex].clips = timeline.lanes[laneIndex].clips.flatMap { original -> [VideoClip] in
+                guard local >= original.timelineStartSeconds,
+                      local < original.timelineStartSeconds + original.durationSeconds else { return [original] }
+                // Live edits may be closer than 50 ms; retain all source frames.
+                let parts = original.split(at: local, minimumDuration: 0)
+                var right = parts?.1 ?? original
+                if original.id == chosen.id {
+                    right.compositingLayer = 1
+                    right.layerAssignmentOrder = order
+                    selectedID = right.id
+                } else if right.compositingLayer == 1 {
+                    right.compositingLayer = 2
+                }
+                return parts.map { [$0.0, right] } ?? [right]
+            }
+        }
+        return selectedID
+    }
+
+    /// A framing preview is temporary. Playback/export always use playbackClips.
+    public func stageClips(at seconds: Double, selectedClipID: String?, previewSelection: Bool) -> [VideoClip] {
+        let output = playbackClips(at: seconds)
+        guard previewSelection, let selectedClipID,
+              let selected = timeline.lanes.lazy.flatMap(\.clips).first(where: { $0.id == selectedClipID }) else { return output }
+        let presented = presentedClip(selected)
+        guard seconds >= presented.timelineStartSeconds,
+              seconds < presented.timelineStartSeconds + presented.durationSeconds else { return output }
+        return [presented] + output.filter { $0.id != selectedClipID }
+    }
+
     /// Presentation offsets are additive and non-destructive. Positive delays video.
     public func videoOffsetSeconds(forLane id: String) -> Double {
         let lane = timeline.lanes.first { $0.id == id }

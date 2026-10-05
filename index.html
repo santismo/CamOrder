@@ -199,12 +199,44 @@
             <p id="playback-status" class="note" role="status"></p>
           </figure>
         </div>
-        <p class="note">Both finished movies are real recordings made with CamOrder. These web copies preserve the original edits and sound.</p>
+        <p class="note">These finished movies are real recordings made with CamOrder. These web copies preserve the original edits and sound.</p>
+      </section>
+      <section class="section" id="full-session" aria-labelledby="full-session-title">
+        <div class="eyebrow">A bigger session</div>
+        <h2 id="full-session-title">Build the music. Cut the picture.</h2>
+        <p class="lead">Drums, keys, synth bass and chords, filmed one part at a time. This saved project brings six video lanes together with cuts, foreground layers and pan/zoom automation.</p>
+        <div class="comparison">
+          <figure>
+            <h3>The arrangement in CamOrder</h3>
+            <video controls playsinline muted preload="metadata" poster="docs/images/full-session-editor.png" width="1280" height="928" aria-label="Play the six-lane CamOrder editing workflow, without audio" aria-describedby="full-editor-caption">
+              <source src="docs/media/full-session-editor.mp4" type="video/mp4">
+              <a href="docs/media/full-session-editor.mp4">Watch the editor workflow as an MP4</a>.
+            </video>
+            <figcaption id="full-editor-caption">An 18-second view of the saved edit in the current CamOrder editor, with controls below the timeline. Silent; captured in a separate preview window. <a href="docs/images/full-session-editor.png">View the editor full size</a>.</figcaption>
+          </figure>
+          <figure>
+            <h3>The finished performance</h3>
+            <video controls playsinline preload="metadata" poster="docs/media/full-session-poster.jpg" width="1280" height="720" aria-label="Play the finished drums and touchscreen instruments performance with music" aria-describedby="full-movie-caption">
+              <source src="docs/media/full-session.mp4" type="video/mp4">
+              <a href="docs/media/full-session.mp4">Watch the finished performance as an MP4</a>.
+            </video>
+            <figcaption id="full-movie-caption">
+              <div class="caption-row"><strong>Every part gets its moment</strong><span>2:08 · With audio</span></div>
+              <p class="media-description">The latest finished cut, with its original music. Drums and touchscreen instruments trade places as the arrangement develops.</p>
+            </figcaption>
+          </figure>
+        </div>
+        <p class="note">Record the parts, choose the foreground, shape the movement, then export. For your next edit, switch between recorded lanes during playback with the live camera shortcuts below.</p>
       </section>
       <section class="section" id="shortcuts" aria-labelledby="shortcuts-title">
         <div class="eyebrow">Keep your hands on the edit</div>
         <h2 id="shortcuts-title">Select a shot. Make your move.</h2>
         <p class="lead">Cut several camera angles together, choose which shot sits in front, and save without breaking your flow.</p>
+        <div class="sync-example">
+          <h3>Switch cameras as the music plays.</h3>
+          <p>Record your angles, stop and leave the video lanes disarmed. Start playback, click inside CamOrder, then press <kbd>1</kbd>–<kbd>9</kbd> for the numbered lanes. Each switch cuts every region crossing that moment and brings your chosen camera forward. Choose <strong>Live cuts: Free</strong> for the playhead position, or <strong>Snap</strong> for the nearest beat or subdivision. Undo reverses the whole switch.</p>
+          <p>Drag the grip beside a lane name to change its position and live-switch number. While paused, number keys assign layers to selected regions instead.</p>
+        </div>
         <p class="note">Click inside CamOrder’s editor to use these editing shortcuts. While typing a name or value, keys stay in that field; press Return or click outside a lane name to finish editing it. ⌘ means Command; ⇧ means Shift; ⌥ means Option.</p>
         <div class="shortcut-groups">
           <div class="shortcut-group">
@@ -221,8 +253,8 @@
           <div class="shortcut-group">
             <h3>Layer, animate &amp; save</h3>
             <dl class="shortcuts">
-              <div><dt><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></dt><dd>Assign selected regions to foreground, middle or background. Lower numbers sit in front.</dd></div>
-              <div><dt><kbd>4</kbd>–<kbd>9</kbd> / <kbd>0</kbd></dt><dd>Add deeper layers, or use 0 for automatic lane order behind numbered layers.</dd></div>
+              <div><dt><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></dt><dd>While paused, assign selected regions to foreground, middle or background. Lower numbers sit in front.</dd></div>
+              <div><dt><kbd>4</kbd>–<kbd>9</kbd> / <kbd>0</kbd></dt><dd>While paused, add deeper layers, or use 0 for automatic lane order behind numbered layers.</dd></div>
               <div><dt><kbd>M</kbd></dt><dd>Add a framing automation marker to the selected region at the playhead.</dd></div>
               <div><dt><kbd>Delete</kbd></dt><dd>Remove selected regions from the timeline.</dd></div>
               <div><dt><kbd aria-label="Command Z">⌘ Z</kbd> / <kbd aria-label="Command Shift Z">⌘ ⇧ Z</kbd></dt><dd>Undo / redo, including region deletion while a lane is armed.</dd></div>
@@ -231,6 +263,8 @@
           </div>
         </div>
         <p class="layer-guide"><strong>Selection is for editing; layer numbers set the picture.</strong> The numbered badge and colored border show a region’s output layer. A yellow outline shows what you’ve selected. Resize or move a foreground shot to reveal other videos behind it. You can also assign layers with the <strong>Output Layer</strong> control.</p>
+        <p class="layer-guide"><strong>Frame the shot underneath.</strong> While paused, <strong>Edit selection</strong> brings your selected video forward so you can set pan and zoom markers even behind another shot. Playback and export keep the actual layer order. Click empty timeline space or the black margin outside the canvas to deselect.</p>
+        <p class="note"><strong>Your layout, your way.</strong> Choose <strong>View → Controls at bottom</strong> for Main Stage first, timeline below, and editing/project controls underneath. Export shows its percentage and a finished notice; the folder icon beside it reveals your movie in Finder.</p>
         <p class="note">Turn on <strong>Snap</strong> and choose a beat or subdivision for cuts, moves and trims that follow Logic’s detected tempo. Shift-click your camera regions, position the playhead, then press T to cut them together. Pinch the timeline to zoom. Save your Logic project separately too.</p>
       </section>
       <section class="setup" id="start" aria-labelledby="setup-title">

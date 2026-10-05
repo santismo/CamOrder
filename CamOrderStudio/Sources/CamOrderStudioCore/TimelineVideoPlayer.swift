@@ -25,6 +25,8 @@ public final class TimelineVideoPlayer {
     public func update(url: URL, sourceSeconds: Double, isPlaying: Bool) {
         guard sourceSeconds.isFinite else { return }
         let next = max(0, sourceSeconds)
+        if self.url == url, !playing, !isPlaying, !needsSeek,
+           abs(next - desiredSeconds) < 0.000001 { return }
         if playing != isPlaying || abs(next - desiredSeconds) > 0.20 { needsSeek = true }
         desiredSeconds = next
         requestedHostTime = CMClockGetTime(CMClockGetHostTimeClock())

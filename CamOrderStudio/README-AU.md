@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.6.0 development build
+# CamOrder Studio Audio Unit — 0.7.0 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -36,6 +36,7 @@ The plug-in has one transport: the red button and **R** forward Logic’s R key 
 - Dark graphite UI with teal accents. **Inspector**, **Media**, and **Sync** open only when requested; click outside to hide them.
 - Resize freely using the window edge or the small **bottom-right resize grip**. Minimum editor content size is **720 × 360**. There are no fixed layout presets.
 - Drag the divider between **Main Stage and Live Inputs** to change their widths. Drag the horizontal divider above the timeline to change monitor/timeline heights. **View** can hide Live Inputs or the timeline and reset panel sizes.
+- **View → Controls at bottom** puts Main Stage first, then the timeline, editing tools, transport and project controls. The preference survives reopening the editor.
 - Main Stage remains available in compact layouts. Each lane’s input selector stays with its name and Arm controls. Lane headers and their Arm buttons scroll together with the timeline.
 - The four small exterior canvas corners adjust width and height independently. Drag inside the video to position it; use pinch or Inspector zoom for framing. Inspector also provides rotation and canvas dimensions.
 - Main Stage and export share **Output Layer** ordering. Selecting a region chooses what to edit; assigning a number determines where it appears in the final composition. Smaller or moved foreground videos reveal the layers behind them. Muted lanes and disabled regions stay hidden; empty gaps stay black.
@@ -70,7 +71,7 @@ The host reports its current tempo, not a full project tempo map. For a project 
 
 ## Foreground and background
 
-Select one or more regions and use **Output Layer** above the timeline, or press a number while the CamOrder editor has keyboard focus:
+While **paused**, select one or more regions and use **Output Layer** in the timeline toolbar, or press a number while the CamOrder editor has keyboard focus:
 
 - **1 — Foreground**, cyan border and badge.
 - **2 — Middle ground**, mint border and badge.
@@ -78,13 +79,36 @@ Select one or more regions and use **Output Layer** above the timeline, or press
 - **4–9** — progressively farther behind the lower numbers.
 - **0 — Automatic**, restoring lane order behind numbered layers.
 
-A **yellow outline** means selected for editing; the numbered badge and colored border identify its output layer. The same ordering is used in Main Stage and the exported movie. If two overlapping regions share a number, the most recently assigned one is in front; equal assignments use lane order. Reassigning **1** brings the chosen region ahead of another layer-1 region. Within one lane and layer, remaining ties use the last overlapping region; different numbered layers can coexist within a lane.
+A **yellow outline** means selected for editing; the numbered badge and colored border identify its output layer. The same ordering is used during Main Stage playback and in the exported movie. The stopped **Edit selection** preview described below temporarily brings your selection forward. If two overlapping regions share a number, the most recently assigned one is in front; equal assignments use lane order. Reassigning **1** brings the chosen region ahead of another layer-1 region. Within one lane and layer, remaining ties use the last overlapping region; different numbered layers can coexist within a lane.
 
 Assignments survive splitting, trimming, copy/paste, Undo and save/reopen. Unassigned regions remain available behind numbered layers, so existing projects keep their previous appearance until you assign layers. A small foreground reveals the videos behind it. Number and editing shortcuts do not apply while you are typing in a text field.
 
+## Live multicamera editing
+
+Record your cameras first, stop, and leave the video lanes disarmed. Start Logic playback, click inside the CamOrder editor, and press **1–9** to choose the corresponding numbered lane. Each press splits every region crossing the cut position and puts the chosen lane's right-hand region in the foreground. Existing foreground regions behind it move to layer 2; framing and smaller picture-in-picture shots are retained. Earlier footage and later existing edit boundaries stay intact. **⌘Z** undoes one switch, including all its cuts and layer changes.
+
+Use **Live cuts: Snap / Free** in the timeline toolbar:
+
+- **Free** cuts at the current playhead time.
+- **Snap** cuts at the nearest point on the current beat/subdivision grid, independently of the ordinary editing Snap toggle. A nearest grid point ahead of the playhead takes effect when playback reaches it; a point behind the playhead makes the cut there.
+
+The first nine lanes are numbered from top to bottom. Empty or muted camera choices leave the edit intact and show a message. Live switching is for recorded footage; finish and disarm active captures first. While paused, numbers keep assigning output layers to the selection instead. **0** restores automatic layering only while paused. Keep keyboard focus in CamOrder and finish any text entry first; these are editor shortcuts, not global Logic key commands.
+
+## Reorder camera lanes
+
+Drag the **grip and number beside a lane name** to another lane header. The insertion line indicates whether the lane will move above or below that header. You can cross several lanes in one drag. The header's right-click menu also provides **Move lane up/down**. Lane order saves with the project and supports Undo; the lane's regions, inputs, offsets and automation move together without changing their times. Live-switch numbers follow the new order. Explicit output layers remain assigned; automatic layers follow lane order.
+
 ## Animate video framing
 
-Select a region, stop at the first desired position, set its framing, and press **M** or **Marker** above the timeline. Move the playhead to another position, add another marker, then change zoom, position or rotation. Once a clip has markers, framing edits update or add the pose at the current playhead; they no longer move every marker together. Each drag is one Undo step. Click a flag in the timeline to preview and edit that point while stopped. Animation plays in Main Stage and export, including after splits and trims.
+Select a region, stop at the first desired position, set its framing, and press **M** or **Marker** in the timeline toolbar. Move the playhead to another position, add another marker, then change zoom, position or rotation. Once a clip has markers, framing edits update or add the pose at the current playhead; they no longer move every marker together. Each drag is one Undo step. Click a flag in the timeline to preview and edit that point while stopped. Animation plays in Main Stage and export, including after splits and trims.
+
+While stopped, **Edit selection** in Main Stage brings the selected region forward so you can frame it even underneath another video. This is a preview at times within that region, including muted or disabled selections; it does not change output layers or exports. Scrub with the ruler or click a marker to keep the selection while positioning automation. Turn **Edit selection** off to inspect the final composition. Starting playback always shows the actual output order. Click empty timeline space, the black margin outside the canvas, or the deselect icon beside **Edit selection** to clear the selection.
+
+## Export progress and location
+
+The Export button shows a progress bar and **percentage** while rendering, then an **Export finished** notice. Preparation begins at 0%; the percentage advances during encoding. The **folder icon beside Export** reveals the last successful movie in Finder, alongside its Logic placement note. The editor no longer opens Finder automatically. Progress and the finished-file link belong to the AU session and survive closing/reopening or repositioning the editor controls. A failed export reports its error and never replaces the link to the previous successful movie.
+
+Main Stage reuses a source's decoder across region cuts and output-layer changes. Thumbnail generation is limited to two simultaneous jobs, cancels obsolete jobs after edits, and uses a bounded cache. Camera recording settings, playback frame rate, thumbnail resolution and export quality are unchanged.
 
 ## Video sync offsets
 

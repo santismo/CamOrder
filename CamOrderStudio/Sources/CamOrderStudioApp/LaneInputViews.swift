@@ -95,6 +95,19 @@ private struct SourcePreviewCard: View {
                     }
                 } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).fixedSize()
             }.padding(.horizontal, 8).padding(.vertical, 5)
+            if sourceID == "screen:region" {
+                HStack(spacing: 6) {
+                    Button("Show region") { inputs.region(for: sourceID).show() }.disabled(busy)
+                    Button("Apply") { inputs.applyRegion(for: sourceID) }.disabled(busy)
+                    Button("Hide") { inputs.region(for: sourceID).hide() }
+                    Spacer(minLength: 0)
+                }.controlSize(.small).padding(.horizontal, 8).padding(.bottom, 6)
+            } else if sourceID == "window:picker" {
+                HStack {
+                    Button("Choose window…") { inputs.engines[sourceID]?.chooseWindow() }.disabled(busy)
+                    Spacer(minLength: 0)
+                }.controlSize(.small).padding(.horizontal, 8).padding(.bottom, 6)
+            }
             if compact {
                 preview.aspectRatio(16.0 / 9.0, contentMode: .fit)
             } else {

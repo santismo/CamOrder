@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.7.1 development build
+# CamOrder Studio Audio Unit — 0.8.0 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -7,7 +7,7 @@ CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **o
 1. Open the downloaded **DMG**, double-click **Install CamOrder Studio.pkg**, and follow the standard Mac installer. It installs the AU and capture helper in your account’s plug-in folder. A direct PKG download is also available; the ZIP retains `Install CamOrder Studio.command` as an alternative. Fully quit and reopen Logic Pro afterward so it loads the new binary.
 2. On **Stereo Out**, choose **Audio FX → Audio Units → Santismo → CamOrder Studio → Stereo**. If missing, rescan CamOrder Studio in Logic’s Plug-in Manager.
 3. Open the project menu beside **CamOrder**, choose **New Project…**, and save a `.camorderstudio` folder alongside your Logic project. Keep that whole folder when moving or sharing the project; it contains the media.
-4. Choose the shared **Default** source under **Live Inputs**. Every lane initially uses that input, and its preview starts automatically. Use the input menu on an individual lane to assign a different camera or screen source. Allow camera or screen access for the included **CamOrder Capture** helper when macOS asks. Permissions can be changed in System Settings → Privacy & Security.
+4. Choose the shared **Default** source under **Live Inputs**. Every lane initially uses that input. Camera and main-display previews start automatically; Screen region needs an applied region, and Window needs a selection in the macOS picker. Use the input menu on an individual lane to assign a different camera or screen source. Allow camera or screen access for the included **CamOrder Capture** helper when macOS asks. Permissions can be changed in System Settings → Privacy & Security.
 5. Wait for the live image(s), **Arm** one or more CamOrder lanes, and press **Play or Record in Logic**. For audio recording, also arm the relevant Logic audio track. You can work in Logic’s timeline or close the plug-in editor; the video session stays active.
 6. Stop Logic to finalize the take. CamOrder automatically disarms the lanes when Stop is confirmed. Arm the desired lanes again for the next take. **Disarm** cancels pre-roll; **Stop Take** finalizes and disarms.
 
@@ -25,7 +25,7 @@ Arm any combination of lanes. Their different cameras follow the same Logic Play
 
 A lane armed during playback starts at the current position. Disarming one shared-camera lane fixes that region’s end while the other lanes keep recording. Its region shows **finishing** until the shared movie is finalized; stop the other lanes sharing that input before rearming that particular lane. Camera selection and capture-region changes are locked while affected lanes are armed or finishing.
 
-Use a preview tile’s **…** menu to restart/stop its preview or show/apply/hide its screen capture region. Multiple previews wrap into a scrollable grid. Hiding Live Inputs affects the layout; it does not stop armed capture.
+Use a preview tile’s **…** menu to restart/stop its preview. Screen region has visible **Show region**, **Apply** and **Hide** buttons. Window has **Choose window…**. Multiple previews wrap into a scrollable grid. Hiding Live Inputs affects the layout; it does not stop armed capture.
 
 There is no fixed three-input cap. Four simultaneous synthetic inputs and four independent helper processes were verified. The number of physical cameras and sustainable frame rate depend on macOS, camera availability, USB bandwidth and encoding load; this build has not been tested with four physical cameras on this Mac.
 
@@ -148,7 +148,18 @@ A single measurement estimates a constant offset. If the mismatch changes at dif
 - Built-in cameras and USB webcams exposed by macOS.
 - iPhone Continuity Camera over USB or wireless. Enable Continuity Camera, use a trusted connection, and refresh the input list after connecting.
 - Wired iPhone/iPad screen capture when macOS exposes the device as a capture input. Connecting a cable alone does not provide an iPhone camera feed; Continuity Camera supplies that.
-- Main display recording or a movable capture region on the main display. Use that input tile’s **… → Show capture region**, then **Apply capture region**. Secondary-display capture and an independent window picker are not included in this build.
+- **Main display** records the main screen. **Screen region (main display)** captures a rectangle: click **Show region**, move/resize the frame on the main display, then **Apply**. **Hide** removes the outline without stopping capture. Whole secondary-display capture is not included.
+- **Window (choose…)**, on **macOS 14+**, captures one individual window using ScreenCaptureKit. Click **Choose window…**, select the desired window in the macOS picker, and confirm sharing. Wait for its Live Inputs image, then arm and record normally. Window audio is not captured. Multiple lanes can share this window input; this release supports one selected window per CamOrder instance alongside other camera/screen inputs.
+
+A window selection lasts for the capture-helper session. Saved projects retain the Window input assignment, but require **Choose window…** again after reopening Logic. Window selection is locked while its lanes are armed or finishing. Closing/minimizing the window or stopping sharing can end capture; restore it and choose it again. Resizing the source keeps the capture canvas fixed at its initial pixel dimensions and fits the window within it, preserving aspect ratio. Static windows keep recording for the full take.
+
+**Live Inputs** shows the chosen camera, screen or window. **Main Stage** shows recorded regions at the timeline playhead; an empty timeline or a gap there is black. A live input by itself does not put a recorded region on Main Stage.
+
+### Screen permission troubleshooting
+
+For Main display and Screen region, enable **CamOrder Capture** under **System Settings → Privacy & Security → Screen & System Audio Recording** (Screen Recording on older macOS). Enable screen access, not just system audio, and fully quit/reopen Logic when macOS requests it. Window capture uses the macOS picker to approve the specific window.
+
+These builds are ad-hoc signed. Updating the capture helper can invalidate an older screen-permission grant even if its switch still looks enabled. First save and quit Logic, remove the stale CamOrder Capture entry with the settings panel’s minus button, then reopen Logic and select Main display to request access for the installed helper. If the entry cannot be removed, the supported Terminal command `tccutil reset ScreenCapture com.santismo.CamOrderStudio.Capture` resets only this helper’s screen grant; reopen Logic and approve the new request afterward. This does not reset camera or microphone permissions.
 
 Captured takes are video-only: they do not record the microphone or Logic’s mix. Import a bounced mix through **Media / Master Audio** if you want it included in the exported file. Imported movies can retain their own audio according to the Inspector’s export audio setting.
 

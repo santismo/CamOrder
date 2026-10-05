@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.7.1").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.8.0").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -827,8 +827,8 @@ private struct PlaybackPreviewPane: View {
                             Text("No video at playhead")
                                 .font(.caption)
                             if geometry.size.height >= 140 {
-                                Text("Assign Output Layers to regions: 1 is foreground, followed by 2 and 3.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                Text("Live Inputs previews your sources. Main Stage plays recorded regions at the playhead.")
+                                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 12)
                             }
                         }
                     }
@@ -2832,20 +2832,21 @@ private func formatTimelineSeconds(_ seconds: Double, frameRate: FrameRate, form
 struct CapturePreviewPane: View {
     @ObservedObject var cameraEngine: CameraCaptureEngine
     var body: some View {
-        if cameraEngine.usesCaptureHelper {
+        if cameraEngine.usesCaptureHelper || cameraEngine.selectedDeviceID == "window:picker" {
             LivePreviewImage(frames: cameraEngine.previewFrames)
         } else { CameraPreviewView(session: cameraEngine.previewSession) }
     }
 }
 
-private struct LivePreviewImage: NSViewRepresentable {
+struct LivePreviewImage: NSViewRepresentable {
     let frames: CapturePreviewFrames
     func makeNSView(context: Context) -> LivePreviewLayerView { LivePreviewLayerView(frames: frames) }
-    func updateNSView(_ view: LivePreviewLayerView, context: Context) {}
+    func updateNSView(_ view: LivePreviewLayerView, context: Context) { view.bind(to: frames) }
 }
 
-private final class LivePreviewLayerView: NSView {
+final class LivePreviewLayerView: NSView {
     private var subscription: AnyCancellable?
+    private weak var source: CapturePreviewFrames?
     init(frames: CapturePreviewFrames) {
         super.init(frame: .zero)
         wantsLayer = true
@@ -2853,6 +2854,14 @@ private final class LivePreviewLayerView: NSView {
         layer?.backgroundColor = NSColor.black.cgColor
         layer?.contentsGravity = .resizeAspect
         layer?.actions = ["contents": NSNull(), "bounds": NSNull()]
+        bind(to: frames)
+    }
+    func bind(to frames: CapturePreviewFrames) {
+        guard source !== frames else { return }
+        subscription?.cancel()
+        source = frames
+        // SwiftUI reuses this view when the single input changes. Subscribe to the
+        // new engine, including its current image, instead of retaining the old one.
         subscription = frames.$image.sink { [weak self] image in self?.layer?.contents = image }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

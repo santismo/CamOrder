@@ -1,5 +1,6 @@
 import XCTest
 @preconcurrency import AVFoundation
+@preconcurrency import CoreMedia
 @testable import CamOrderStudioCore
 
 private final class CaptureResult: @unchecked Sendable {
@@ -87,6 +88,65 @@ final class CaptureWriterTests: XCTestCase {
         }
         writer.queue.async { writer.begin(url: url); writer.finish() }
         await fulfillment(of: [finished], timeout: 5)
+    }
+    func testStaticWindowRecordsFullTakeAndUsesRecordTimeInsteadOfOldPreviewTime() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let writer = CaptureWriter(), token = UUID(), result = CaptureResult()
+        let finished = expectation(description: "static window finalized")
+        writer.onStarted = { result.started($0) }
+        writer.onFinished = { _, duration, message in result.finished(duration, message); finished.fulfill() }
+        let stalePreview = try makeSample(seconds: 100)
+        let start = CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        writer.queue.async {
+            writer.beginWindowStream(token: token)
+            XCTAssertTrue(writer.receiveWindowFrame(stalePreview, token: token))
+            writer.begin(url: url)
+        }
+        // No subsequent changed frames: SCStream may emit only idle events.
+        try await Task.sleep(nanoseconds: 6_200_000_000)
+        writer.queue.async { writer.finish(); writer.endWindowStream(token: token) }
+        await fulfillment(of: [finished], timeout: 10)
+        XCTAssertNil(result.error)
+        XCTAssertEqual(try XCTUnwrap(result.hostTime), start, accuracy: 0.3)
+        XCTAssertEqual(result.duration, 6.2, accuracy: 0.2)
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration)
+        XCTAssertEqual(duration.seconds, 6.2, accuracy: 0.2)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        XCTAssertEqual(tracks.count, 1)
+        let generator = AVAssetImageGenerator(asset: asset)
+        _ = try await generator.image(at: CMTime(seconds: 5.8, preferredTimescale: 600))
+    }
+    func testReplacingWindowRejectsLateFramesAndStopFinalizesActiveTake() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mov")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let writer = CaptureWriter(), old = UUID(), current = UUID()
+        let first = try makeSample(seconds: 100, width: 64, height: 64)
+        let second = try makeSample(seconds: 200, width: 128, height: 64)
+        let finished = expectation(description: "closed window finalized")
+        writer.onFinished = { _, duration, message in
+            XCTAssertGreaterThan(duration, 0.1)
+            XCTAssertNotNil(message)
+            finished.fulfill()
+        }
+        writer.queue.async {
+            writer.beginWindowStream(token: old)
+            XCTAssertTrue(writer.receiveWindowFrame(first, token: old))
+            writer.endWindowStream(token: old)
+            writer.beginWindowStream(token: current)
+            XCTAssertTrue(writer.receiveWindowFrame(second, token: current))
+            XCTAssertFalse(writer.receiveWindowFrame(first, token: old))
+            writer.endWindowStream(token: old) // A late stop must not stop the new stream.
+            writer.begin(url: url)
+        }
+        try await Task.sleep(nanoseconds: 400_000_000)
+        writer.queue.async { writer.endWindowStream(token: current) }
+        await fulfillment(of: [finished], timeout: 10)
+        let tracks = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let size = try await track.load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 128, height: 64))
     }
     private func makeSample(seconds: Double, width: Int = 64, height: Int = 64) throws -> CMSampleBuffer {
         var pixel: CVPixelBuffer?

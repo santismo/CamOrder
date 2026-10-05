@@ -32,7 +32,7 @@ Normal Stereo Out operation uses Logic's Audio Unit transport: no MIDI, MTC or t
 
 Every lane starts with the shared **Default** input. Assign another source to a lane when you want another angle; each distinct source gets its own preview. Start with three lanes and add more as needed. Lanes sharing one source share its camera connection and recording file.
 
-Webcams, macOS-exposed iPhone/Continuity Camera inputs, and main-display screen or region capture are supported. Four simultaneous synthetic inputs were verified; physical capacity depends on the devices, USB bandwidth and Mac.
+Webcams, macOS-exposed iPhone/Continuity Camera inputs, main-display screen or region capture, and individual-window capture are supported. For a window, select **Window (choose…) → Choose window…** and use the macOS picker (macOS 14+). Four simultaneous synthetic inputs were verified; physical capacity depends on the devices, USB bandwidth and Mac.
 
 ## Edit and export
 
@@ -74,6 +74,6 @@ auval -v aufx CmSt Sntm
 
 To build the DMG and native installer from the verified component, run `python3 Scripts/package-installer.py`. See [installer packaging and verification](docs/INSTALLER.md).
 
-Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.7.1.md) for the tests and their limits.
+Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.8.0.md) for the tests and their limits.
 
 CamOrder is [MIT licensed](LICENSE). The vendored AudioUnitSDK has its [own license](CamOrderStudio/Vendor/AudioUnitSDK/LICENSE.txt).

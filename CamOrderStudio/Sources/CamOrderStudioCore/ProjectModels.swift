@@ -154,6 +154,14 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
     /// 1 is frontmost. Nil keeps legacy lane ordering behind numbered layers.
     public var compositingLayer: Int?
     public var layerAssignmentOrder: Int?
+    /// Unshifted timeline position of source time zero; retained through edits.
+    public var recordedSourceOriginSeconds: Double?
+
+    public var recordedTimelineStartSeconds: Double? {
+        guard let origin = recordedSourceOriginSeconds, origin.isFinite, trimInSeconds.isFinite else { return nil }
+        let start = origin + trimInSeconds
+        return start.isFinite ? start : nil
+    }
 
     public init(
         id: String = UUID().uuidString,
@@ -176,7 +184,8 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         framing: ClipFraming? = nil,
         playbackSyncOffsetSeconds: Double? = nil,
         automationMarkers: [ClipAutomationMarker] = [],
-        compositingLayer: Int? = nil
+        compositingLayer: Int? = nil,
+        recordedSourceOriginSeconds: Double? = nil
     ) {
         self.id = id
         self.clipId = clipId
@@ -199,6 +208,7 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         self.playbackSyncOffsetSeconds = playbackSyncOffsetSeconds
         self.automationMarkers = automationMarkers
         self.compositingLayer = compositingLayer
+        self.recordedSourceOriginSeconds = recordedSourceOriginSeconds.flatMap { $0.isFinite ? $0 : nil }
     }
 
     public static func timelineStart(logicStartSeconds: Double, captureLatencyMs: Int) -> Double {
@@ -261,7 +271,7 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         case framing
         case playbackSyncOffsetSeconds
         case automationMarkers
-        case compositingLayer, layerAssignmentOrder
+        case compositingLayer, layerAssignmentOrder, recordedSourceOriginSeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -288,6 +298,7 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
         playbackSyncOffsetSeconds = try container.decodeIfPresent(Double.self, forKey: .playbackSyncOffsetSeconds)
         automationMarkers = try container.decodeIfPresent([ClipAutomationMarker].self, forKey: .automationMarkers) ?? []
         layerAssignmentOrder = try container.decodeIfPresent(Int.self, forKey: .layerAssignmentOrder)
+        recordedSourceOriginSeconds = try container.decodeIfPresent(Double.self, forKey: .recordedSourceOriginSeconds).flatMap { $0.isFinite ? $0 : nil }
         compositingLayer = try container.decodeIfPresent(Int.self, forKey: .compositingLayer).flatMap { (1...9).contains($0) ? $0 : nil }
     }
 }

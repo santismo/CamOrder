@@ -39,6 +39,7 @@ final class ProjectStore: ObservableObject {
         var ids: Set<String>
         var kind: RegionEditKind
         var delta: Double
+        var laneDelta: Int = 0
     }
     @Published var lastError: String?
     @Published private(set) var lastManualSaveAt: Date?
@@ -910,7 +911,8 @@ final class ProjectStore: ObservableObject {
             droppedFrameWarnings: warnings,
             trimInSeconds: pendingTake.trimInSeconds,
             trimOutSeconds: mediaDuration,
-            playbackSyncOffsetSeconds: pendingTake.playbackSyncOffsetSeconds
+            playbackSyncOffsetSeconds: pendingTake.playbackSyncOffsetSeconds,
+            recordedSourceOriginSeconds: pendingTake.startSeconds - pendingTake.trimInSeconds
         )
 
         registerUndo(project: document.project)
@@ -1597,6 +1599,35 @@ extension ProjectStore {
         saveProject()
     }
 
+    func moveRegionLaneDelta(anchor id: String, toLaneID laneID: String) -> Int? {
+        guard let source = project.timeline.lanes.firstIndex(where: { $0.clips.contains { $0.id == id } }),
+              let target = project.timeline.lanes.firstIndex(where: { $0.id == laneID }) else { return nil }
+        let ids = selectedClipIDs.contains(id) ? selectedClipIDs : [id]
+        let delta = target - source
+        guard project.clampedRegionLaneDelta(ids: ids, requested: delta) == delta else { return nil }
+        return delta
+    }
+
+    func moveRegions(anchor id: String, toLaneID laneID: String) {
+        guard let delta = moveRegionLaneDelta(anchor: id, toLaneID: laneID) else { return }
+        commitRegionEdit(anchor: id, kind: .move, translation: 0, bypassSnap: true, laneDelta: delta)
+    }
+
+    func canReturnToRecordedPosition(anchor id: String) -> Bool {
+        let ids = selectedClipIDs.contains(id) ? selectedClipIDs : [id]
+        return project.canReturnRegionsToRecordedPosition(ids: ids)
+    }
+
+    func returnToRecordedPosition(anchor id: String) {
+        guard var document else { return }
+        selectRegion(id, preserveGroup: true)
+        let previous = document.project
+        guard document.project.returnRegionsToRecordedPosition(ids: selectedClipIDs) else { return }
+        registerUndo(project: previous)
+        self.document = document
+        saveProject()
+    }
+
     /// One common delta keeps multi-camera edits aligned. The tightest source or
     /// timeline limit in the selection constrains the entire gesture.
     func regionEditDelta(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false) -> Double {
@@ -1604,7 +1635,7 @@ extension ProjectStore {
         let selected = selectedClipIDs.contains(id) ? selectedRegions() : [anchor]
         let presented = project.presentedClip(anchor)
         let edge = presented.timelineStartSeconds + (kind == .right ? anchor.durationSeconds : 0)
-        let requested = snappedTime(edge + translation, bypass: bypassSnap) - edge
+        let requested = kind == .move && translation == 0 ? 0 : snappedTime(edge + translation, bypass: bypassSnap) - edge
         var minimum = -Double.infinity, maximum = Double.infinity
         for clip in selected {
             let start = project.presentedClip(clip).timelineStartSeconds
@@ -1625,20 +1656,29 @@ extension ProjectStore {
         return max(minimum, min(maximum, requested))
     }
 
-    func previewRegionEdit(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false) {
+    func previewRegionEdit(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false, laneDelta: Int = 0) {
         selectRegion(id, preserveGroup: true)
         let preview = RegionEditPreview(ids: selectedClipIDs, kind: kind,
-            delta: regionEditDelta(anchor: id, kind: kind, translation: translation, bypassSnap: bypassSnap))
+            delta: regionEditDelta(anchor: id, kind: kind, translation: translation, bypassSnap: bypassSnap),
+            laneDelta: kind == .move ? project.clampedRegionLaneDelta(ids: selectedClipIDs, requested: laneDelta) : 0)
         if regionEditPreview != preview { regionEditPreview = preview }
     }
 
-    func commitRegionEdit(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false) {
+    func commitRegionEdit(anchor id: String, kind: RegionEditKind, translation: Double, bypassSnap: Bool = false, laneDelta: Int = 0) {
         defer { regionEditPreview = nil }
         guard var document else { return }
         selectRegion(id, preserveGroup: true)
         let delta = regionEditDelta(anchor: id, kind: kind, translation: translation, bypassSnap: bypassSnap)
-        guard abs(delta) > 0.0000001 else { return }
+        let shift = kind == .move ? project.clampedRegionLaneDelta(ids: selectedClipIDs, requested: laneDelta) : 0
+        guard abs(delta) > 0.0000001 || shift != 0 else { return }
         let previous = document.project
+        if kind == .move {
+            guard document.project.moveRegions(ids: selectedClipIDs, seconds: delta, laneDelta: shift) else { return }
+            registerUndo(project: previous)
+            self.document = document
+            saveProject()
+            return
+        }
         for laneIndex in document.project.timeline.lanes.indices {
             let laneID = document.project.timeline.lanes[laneIndex].id
             for clipIndex in document.project.timeline.lanes[laneIndex].clips.indices {

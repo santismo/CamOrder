@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.7.0 development build
+# CamOrder Studio Audio Unit — 0.7.1 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -52,6 +52,10 @@ Window behavior and screenshots were checked in an owned native AU host. Logic a
 **Save** is beside Export, and **⌘S** saves the CamOrder project while its editor is active. The button briefly confirms **Saved**. Edits continue to save automatically. Saving the CamOrder project does not replace saving the Logic project.
 
 Select a region, or **Shift-click** to add/remove regions in a group. **⌘A** selects all regions when the editor has focus. Drag a selected region to move the group; drag its **left or right edge grip** to trim or restore available footage. Both grips have a larger target and a left/right resize cursor; narrow regions show the grips just outside their ends. The left edge changes the source in-point while keeping the right edge fixed. The right edge changes the end and stops at the source movie’s limit. Drag the middle to move the region. The same time adjustment applies to every selected region, constrained by the tightest source or timeline limit so the cameras remain aligned. Each group gesture is one Undo step. Right-click a region for **Snap Left/Right Edge to Grid**.
+
+To move footage between lanes, **drag the middle of a region up or down**, or right-click it and choose **Move to Lane**. Vertical-only moves keep the visible start exactly where it was, even between lanes with different sync offsets. Moving sideways at the same time follows the normal snap setting. A selected group keeps its relative lane spacing and stops at the first/last lane; the menu disables destinations that cannot fit the whole group. The menu also reaches lanes outside the visible viewport. Moving footage retains trims, animation and explicit output layers; automatic layering follows the destination lane. A lane's camera assignment is unchanged.
+
+Right-click **Return to Recorded Position** to put the selected source frames back at the time they were recorded. This preserves cuts, edge trims, framing, automation and the current lane, and still applies the current lane/project sync offsets. It bypasses beat snapping and supports Undo/Redo, including while armed. The recording anchor survives moves, splits, trims, copy/paste and save/reopen. It is saved for **new recordings made with this build or later**. Older recordings and imported movies without that anchor show the action disabled; their original positions cannot be reconstructed reliably after editing.
 
 To repeat edited regions:
 
@@ -178,7 +182,7 @@ The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 secon
 
 ## Verification
 
-- 51 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
+- 62 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
 - Region editing regression: host beat/tempo phase at 88 BPM, Shift-selection and group cut/move/trim with independent offsets, source limits, numbered output layers, grouped clipboard and Undo; native left/right edge mouse gestures, narrow regions and project zero, one-step Undo, copy/paste with independent destination offsets, preserved trims/framing/automation, repeated paste, deleted-source recovery, project isolation, save/reopen and ⌘C/⌘V/⌘S dispatch.
 - Calculator session regression: project/lane Apply, existing-offset refinement, save/reopen, Undo, repeated/stale/out-of-range protection and inputs retained across editor recreation.
 - Installed-component validation with Apple’s `auval` for `aufx / CmSt / Sntm`.

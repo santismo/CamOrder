@@ -149,6 +149,8 @@ struct SessionIntegration {
         session.store.unarmAllLanes()
         RunLoop.main.run(until: Date().addingTimeInterval(0.7))
         let finalClip = session.store.project.timeline.lanes[0].clips.last!
+        require(finalClip.recordedSourceOriginSeconds != nil && abs(finalClip.recordedTimelineStartSeconds! - finalClip.timelineStartSeconds) < 1e-9,
+            "New recordings retain source-zero provenance including capture preroll")
         require(session.store.pendingTake == nil && !session.store.hasArmedLane && finalClip.durationSeconds > 2.2, "Manual Stop Take retains video captured during unavailable timing")
         print("PASS: unavailable host timing freezes the playhead, preserves capture, and manual Stop Take saves the captured duration")
         // Exercise the real CoreMIDI virtual destination with AU processing stopped.
@@ -215,6 +217,7 @@ struct SessionIntegration {
         print("PASS: R and Space keyboard handoff reaches the host responder exactly once")
         try runEditingRegression()
         try runRegionClipboardRegression()
+        try runRegionPlacementRegression()
         try runMusicalRegionEditingRegression()
         try runLiveEditingRegression()
         try runSyncCalculatorRegression()

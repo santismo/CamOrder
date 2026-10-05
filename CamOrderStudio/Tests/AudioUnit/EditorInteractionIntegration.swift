@@ -160,7 +160,7 @@ func runEditorInteractionRegression(view: NSView, window: NSWindow, session: Plu
     store.selectedClipId = nil
     session.sync.preview(at: 5)
     RunLoop.main.run(until: Date().addingTimeInterval(0.25))
-    func regionMouse(_ id: String, shift: Bool = false, drag: CGFloat = 0, leftEdge: Bool = false) {
+    func regionMouse(_ id: String, shift: Bool = false, drag: CGFloat = 0, down: CGFloat = 0, leftEdge: Bool = false) {
         view.layoutSubtreeIfNeeded()
         let identifier = "\(leftEdge ? "trim-left" : "region-body")-\(id)"
         guard let target = descendants(view).first(where: { $0.identifier?.rawValue == identifier }) else { fatalError("Missing \(identifier)") }
@@ -181,13 +181,23 @@ func runEditorInteractionRegression(view: NSView, window: NSWindow, session: Plu
         let point = target.convert(NSPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil)
         let flags: NSEvent.ModifierFlags = shift ? .shift : []
         for step in 0...4 {
-            if drag == 0 && step > 0 && step < 4 { continue }
+            if drag == 0 && down == 0 && step > 0 && step < 4 { continue }
             let type: NSEvent.EventType = step == 0 ? .leftMouseDown : (step == 4 ? .leftMouseUp : .leftMouseDragged)
-            send(NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x + drag * CGFloat(min(step, 3)) / 3, y: point.y),
+            send(NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x + drag * CGFloat(min(step, 3)) / 3, y: point.y - down * CGFloat(min(step, 3)) / 3),
                 modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                 context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)!)
         }
     }
+    regionMouse(cameraRegions[0].id, down: 64)
+    require(store.clip(id: cameraRegions[0].id)?.armedLaneId == store.project.timeline.lanes[1].id,
+        "Native vertical body drag must move a region to the next lane")
+    require(abs(store.clip(id: cameraRegions[0].id)!.timelineStartSeconds - 4) < 0.001,
+        "A vertical-only drag must retain exact timing")
+    store.undoProjectChange()
+    require(store.clip(id: cameraRegions[0].id) == cameraRegions[0])
+    store.selectedClipId = nil
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    print("PASS: native region drag across lanes retains time and supports one-step Undo")
     for (index, region) in cameraRegions.enumerated() {
         regionMouse(region.id, shift: index > 0)
     }

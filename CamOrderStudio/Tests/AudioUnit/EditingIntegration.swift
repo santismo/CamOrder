@@ -225,3 +225,47 @@ func runMusicalRegionEditingRegression() throws {
     require(saved.project.timeline == store.project.timeline)
     print("PASS: host-anchored 88 BPM snapping, Shift-selection, three-camera cuts, group moves/trims/source limits, layer ordering, grouped clipboard, armed Undo and save/reopen")
 }
+
+@MainActor
+func runRegionPlacementRegression() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("CamOrder-placement-" + UUID().uuidString + ".camorderstudio")
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let store = ProjectStore()
+    store.document = try ProjectDocument.create(at: folder, project: .empty())
+    let lane = store.project.timeline.lanes[0].id, destination = store.project.timeline.lanes[1].id
+    let source = VideoClip(clipId: "take", mediaAssetId: "source", videoFile: "test.mov", armedLaneId: lane,
+        logicStartTimecode: .from(seconds: 10.123, frameRate: .fps30), logicStartSeconds: 10.123,
+        durationSeconds: 8, frameRate: .fps30, trimInSeconds: 2, recordedSourceOriginSeconds: 8.123)
+    store.project.media = [MediaAsset(id: "source", kind: .video, displayName: "Take", relativePath: "test.mov", durationSeconds: 20)]
+    store.project.timeline.lanes[0].clips = [source]
+    store.project.timeline.lanes[1].videoOffsetMS = 150
+    store.project.sync.videoOffsetMS = -82
+    store.selectedClipId = source.id
+    store.armLane(lane)
+    let before = store.project
+    store.previewRegionEdit(anchor: source.id, kind: .move, translation: 0, laneDelta: 1)
+    require(store.regionEditPreview?.laneDelta == 1 && store.regionEditPreview?.delta == 0 && store.project == before,
+        "Vertical drag preview must leave the document and off-beat timing intact")
+    store.commitRegionEdit(anchor: source.id, kind: .move, translation: 0, laneDelta: 1)
+    require(store.regionEditPreview == nil && store.clip(id: source.id)?.armedLaneId == destination)
+    require(abs(store.project.presentedClip(store.clip(id: source.id)!).timelineStartSeconds - before.presentedClip(source).timelineStartSeconds) < 1e-9)
+    store.undoProjectChange(); require(store.project.timeline == before.timeline && store.hasArmedLane)
+    store.redoProjectChange(); require(store.clip(id: source.id)?.armedLaneId == destination)
+    store.moveRegions(anchor: source.id, toLaneID: lane)
+    var returned = store.clip(id: source.id)!
+    require(abs(returned.timelineStartSeconds - source.timelineStartSeconds) < 1e-9)
+    returned.timelineStartSeconds = source.timelineStartSeconds
+    require(returned == source, "Context move back preserves source state")
+    store.commitRegionEdit(anchor: source.id, kind: .move, translation: 7, bypassSnap: true)
+    store.copySelectedRegion(); store.pasteRegion(at: 30, laneID: destination)
+    let copy = store.selectedClip()!
+    require(copy.recordedSourceOriginSeconds == source.recordedSourceOriginSeconds)
+    require(store.canReturnToRecordedPosition(anchor: copy.id))
+    store.returnToRecordedPosition(anchor: copy.id)
+    require(abs(store.clip(id: copy.id)!.timelineStartSeconds - 10.123) < 1e-9 && store.hasArmedLane)
+    store.undoProjectChange(); require(store.clip(id: copy.id) == copy)
+    store.redoProjectChange()
+    let reopened = try ProjectDocument.open(at: folder)
+    require(reopened.project.timeline == store.project.timeline && store.clip(id: copy.id)?.recordedSourceOriginSeconds == 8.123)
+    print("PASS: cross-lane preview/commit/context moves preserve sync, armed Undo/Redo, recording origin through copy/paste, restore and save/reopen")
+}

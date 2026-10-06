@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.8.0 development build
+# CamOrder Studio Audio Unit — 0.9.0 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -108,6 +108,16 @@ Select a region, stop at the first desired position, set its framing, and press 
 
 While stopped, **Edit selection** in Main Stage brings the selected region forward so you can frame it even underneath another video. This is a preview at times within that region, including muted or disabled selections; it does not change output layers or exports. Scrub with the ruler or click a marker to keep the selection while positioning automation. Turn **Edit selection** off to inspect the final composition. Starting playback always shows the actual output order. Click empty timeline space, the black margin outside the canvas, or the deselect icon beside **Edit selection** to clear the selection.
 
+## Automatic zoom and pan
+
+Select a region, or Shift-click several, then click the **wand (Motion)** in the timeline toolbar. Right-click **Motion…** opens the same panel. Choose zoom **In/Out** and/or a pan direction, including diagonals. **Subtle**, **Gentle** and **Bold** set starting amounts; the Zoom and Travel sliders let you refine them. Travel is a percentage of the canvas width/height, and pan describes the direction the camera looks (the image moves the opposite way).
+
+Click or drag on the still preview to choose a zoom focal point, or press **Center**. The play button previews a four-second loop of the proposed framing on a still image; it does not start Logic. Each selected region receives a full move across its own current trimmed length. The preview shows the active region; applying also uses each other selected video's dimensions.
+
+**Keep edges covered**, on by default, adds enough crop to fill the project's canvas throughout the move, including rotated framing and portrait sources. It can require substantial crop when source and canvas proportions differ. Turn it off for smaller overlay videos. This covers the source's outer edges; black bars already baked into a recording remain part of that video. Changing the canvas, extending a region or editing its markers afterward can require applying motion again.
+
+Choose **Add to existing** to combine with current automation; applying again can stack another move. **Replace** clears its old markers and starts from the region's current opening framing. **Apply motion** creates ordinary editable automation markers. One Undo restores the entire selection, even across lanes. Original media, trimmed source positions, timeline positions, layering and sync offsets are unchanged; generated animation plays through the normal Main Stage/export path. Combined curves use sampled linear markers to avoid pausing at every intermediate point.
+
 ## Export progress and location
 
 The Export button shows a progress bar and **percentage** while rendering, then an **Export finished** notice. Preparation begins at 0%; the percentage advances during encoding. The **folder icon beside Export** reveals the last successful movie in Finder, alongside its Logic placement note. The editor no longer opens Finder automatically. Progress and the finished-file link belong to the AU session and survive closing/reopening or repositioning the editor controls. A failed export reports its error and never replaces the link to the previous successful movie.
@@ -189,23 +199,15 @@ Stopped cursor movement can only be followed when Logic sends a position report.
 
 Live frames now update a native image layer directly. Timeline geometry and filmstrips no longer rebuild with every playhead tick; moving cursors and clocks update separately. Playback seeks are serialized, and resuming the decoder uses the requested host-clock anchor so seek completion does not leave a persistent playback delay.
 
-The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **358 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
+Earlier-build measurements: the synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **358 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
 
 ## Verification
 
-- 62 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
-- Region editing regression: host beat/tempo phase at 88 BPM, Shift-selection and group cut/move/trim with independent offsets, source limits, numbered output layers, grouped clipboard and Undo; native left/right edge mouse gestures, narrow regions and project zero, one-step Undo, copy/paste with independent destination offsets, preserved trims/framing/automation, repeated paste, deleted-source recovery, project isolation, save/reopen and ⌘C/⌘V/⌘S dispatch.
-- Calculator session regression: project/lane Apply, existing-offset refinement, save/reopen, Undo, repeated/stale/out-of-range protection and inputs retained across editor recreation.
-- Installed-component validation with Apple’s `auval` for `aufx / CmSt / Sntm`.
-- Bit-exact mono/stereo pass-through at 44.1, 48 and 96 kHz, including silent input and 1/64/512-frame blocks; independent Audio Unit instance state.
-- Native editor creation, close/reopen and screenshots at 1280 × 820, 820 × 520, 1120 × 460, 760 × 440, arbitrary 803 × 417, and minimum 720 × 360; the four-input overview is also captured at 1280 × 960.
-- Production recording session with no editor: Play/Record, host following, Stop, repeated takes, missing callbacks and manual finalization, using real encoded synthetic-camera movies, plus automatic disarming and AU restoration before editor creation.
-- Multi-input session regression: three lanes sharing one camera/file, three different cameras with one disconnecting mid-take, independent late arm/stop on a shared camera, four simultaneous encoded movies, and assignment save/reopen.
-- Four capture helpers running together with isolated command channels and clean shutdown, without activating physical cameras.
-- Isolated CoreMIDI fallback transport with no AU processing, R/Space forwarding, actual SwiftUI canvas and window-grip drags, native lane-name Return/click-away focus, distant timeline scrolling/pinch anchoring, and saved edit/offset/armed-undo/marker regressions.
-- Capture-helper launch, input discovery and clean shutdown without activating a physical camera.
+This **0.9.0 test build** compiles for Intel/macOS 13+ and passes strict bundle signature verification. **56 distinct Swift checks passed**, including 12 new motion/model/store tests: directional and diagonal moves, focal anchors, aspect ratios, rotated edge coverage, affine export ramp geometry, combined curves, bounded marker counts, trim/split behavior, legacy decoding, atomic multi-selection changes, Undo/Redo and save/reopen.
 
-A verification summary and screenshots are included in the release. The actual Logic session and physical camera combination still need a user check after restart. The download is a locally signed development build for **Intel Macs, macOS 13 or newer**, not a notarized or universal distribution release.
+Rendered movie export and AU runtime validation remain **unverified in this build**. The current restricted test environment cannot provide working video/GPU services or register the AU; an unanimated export control and the already-installed 0.8.0 AU also fail there. The native panel's layout test passes, but its screenshot is incomplete under those graphics failures and is not visual confirmation. Test Motion in Logic and export a short section before relying on it for a full edit. See the matching `VERIFICATION.md` in the ZIP, or `docs/VERIFICATION-0.9.0.md` in the repository, for exact limits. Earlier release results are recorded separately in `docs/VERIFICATION-0.8.0.md`.
+
+This local test package retains the exact working 0.8.0 capture helper; capture protocols and recording code have not changed. The 0.9.0 editor writes normal editable framing markers. The package is for **Intel Macs, macOS 13 or newer**, and remains locally signed, unsigned at installer level and not notarized.
 
 An old cut made before the 0.2.5 fixes may already contain an incorrect saved source start. The app cannot safely infer its intended content; redo an affected old cut from the original take. Original media remains intact.
 

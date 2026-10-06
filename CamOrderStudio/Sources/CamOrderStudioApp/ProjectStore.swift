@@ -33,6 +33,7 @@ final class ProjectStore: ObservableObject {
     @Published private(set) var hostGrid: MusicalGrid?
     @Published private(set) var regionEditPreview: RegionEditPreview?
     @Published private(set) var liveCutMessage: String?
+    @Published private(set) var isApplyingMotion = false
 
     enum RegionEditKind { case move, left, right }
     struct RegionEditPreview: Equatable {
@@ -1235,6 +1236,57 @@ final class ProjectStore: ObservableObject {
             self.document = document
             saveProject()
             return
+        }
+    }
+
+    func applyAutomaticMotion(_ motion: AutomaticMotion) async -> Bool {
+        guard !isApplyingMotion, let original = document else { return false }
+        let clips = selectedRegions()
+        guard !clips.isEmpty else { return false }
+        isApplyingMotion = true
+        defer { isApplyingMotion = false }
+        let canvas = original.project.exportSettings.canvasPixelSize
+        do {
+            var sizes: [String: CGSize] = [:]
+            var replacements: [String: VideoClip] = [:]
+            for clip in clips {
+                let size: CGSize
+                if let cached = sizes[clip.videoFile] { size = cached }
+                else {
+                    size = try await MotionMedia.displaySize(at: original.absoluteURL(for: clip.videoFile))
+                    sizes[clip.videoFile] = size
+                }
+                replacements[clip.id] = try motion.applying(to: clip, sourceSize: size, canvasSize: canvas)
+            }
+            // Media loading can yield to other edits, transport or a new project.
+            // Commit the whole selection once only if its source state still fits.
+            guard var current = document, current.folderURL == original.folderURL,
+                  current.project.exportSettings.canvasPixelSize == canvas,
+                  clips.allSatisfy({ self.clip(id: $0.id) == $0 }) else {
+                throw MotionFailure("The selected regions or canvas changed while loading. Apply motion again to the current selection.")
+            }
+            let previous = current.project
+            for lane in current.project.timeline.lanes.indices {
+                for index in current.project.timeline.lanes[lane].clips.indices {
+                    let id = current.project.timeline.lanes[lane].clips[index].id
+                    if let replacement = replacements[id] { current.project.timeline.lanes[lane].clips[index] = replacement }
+                }
+            }
+            if let grid = hostGrid {
+                current.project.timeline.tempoBPM = grid.tempoBPM
+                current.project.timeline.gridOriginSeconds = grid.originSeconds
+            }
+            // A failed save must not leave half of an apparent Apply behind or
+            // encourage applying the same motion twice after an error.
+            try current.save()
+            registerUndo(project: previous)
+            document = current
+            onDocumentChange?()
+            lastError = nil
+            return true
+        } catch {
+            lastError = "Motion was not applied. \(error.localizedDescription)"
+            return false
         }
     }
 

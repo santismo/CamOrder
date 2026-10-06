@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.8.0").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.9.0").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -843,22 +843,16 @@ private struct PlaybackPreviewPane: View {
     }
 
     private var projectCanvasPixelSize: CGSize {
-        CGSize(
-            width: CGFloat(max(1, store.project.exportSettings.canvasWidth ?? 1920)),
-            height: CGFloat(max(1, store.project.exportSettings.canvasHeight ?? 1080))
-        )
+        let size = store.project.exportSettings.canvasPixelSize
+        return CGSize(width: max(1, size.width), height: max(1, size.height))
     }
 
     private var canvasAspectRatio: CGFloat {
-        let width = max(1, store.project.exportSettings.canvasWidth ?? 1920)
-        let height = max(1, store.project.exportSettings.canvasHeight ?? 1080)
-        return CGFloat(width) / CGFloat(height)
+        projectCanvasPixelSize.width / projectCanvasPixelSize.height
     }
 
     private var canvasLabel: String {
-        let width = store.project.exportSettings.canvasWidth ?? 1920
-        let height = store.project.exportSettings.canvasHeight ?? 1080
-        return "\(width)x\(height) \(store.project.exportSettings.container.displayName)"
+        "\(Int(projectCanvasPixelSize.width))x\(Int(projectCanvasPixelSize.height)) \(store.project.exportSettings.container.displayName)"
     }
 
     private func canvasDisplaySize(in availableSize: CGSize, canvasPixels: CGSize) -> CGSize {
@@ -1762,6 +1756,7 @@ private struct TimelineView: View {
     var compact = false
     var controlsAtBottom = false
     @State private var followedSeconds = 0.0
+    @State private var showMotion = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1882,6 +1877,10 @@ private struct TimelineView: View {
                                                         store.selectRegion(clip.id, preserveGroup: true); store.snapSelectedClipEndToGrid()
                                                     }
                                                     Divider()
+                                                    Button("Motion…") {
+                                                        store.selectRegion(clip.id, preserveGroup: true)
+                                                        showMotion = true
+                                                    }
                                                     Button {
                                                         store.selectRegion(clip.id, preserveGroup: true)
                                                         store.selectedMediaAssetId = clip.mediaAssetId
@@ -1974,6 +1973,11 @@ private struct TimelineView: View {
                 Divider()
                     .frame(height: 18)
                 HStack(spacing: 4) {
+                    Button { showMotion = true } label: { Image(systemName: "wand.and.stars") }
+                        .help("Motion: automatic zoom and pan for selected regions")
+                        .accessibilityLabel("Motion")
+                        .disabled(store.selectedClipIDs.isEmpty || store.isApplyingMotion)
+                        .popover(isPresented: $showMotion) { MotionPane().environmentObject(store) }
                     Button {
                         store.insertAutomationMarker(at: activePlayheadSeconds)
                     } label: {

@@ -28,11 +28,13 @@ let package = Package(
         ),
         .testTarget(
             name: "CamOrderStudioCoreTests",
-            dependencies: ["CamOrderStudioCore"]
+            dependencies: ["CamOrderStudioCore"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "CamOrderStudioAppTests",
-            dependencies: ["CamOrderStudioApp", "CamOrderStudioCore"]
+            dependencies: ["CamOrderStudioApp", "CamOrderStudioCore"],
+            resources: [.copy("Fixtures")]
         )
     ]
 )

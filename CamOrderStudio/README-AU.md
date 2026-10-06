@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.9.0 development build
+# CamOrder Studio Audio Unit — 0.9.2 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
 
@@ -83,7 +83,7 @@ While **paused**, select one or more regions and use **Output Layer** in the tim
 - **4–9** — progressively farther behind the lower numbers.
 - **0 — Automatic**, restoring lane order behind numbered layers.
 
-A **yellow outline** means selected for editing; the numbered badge and colored border identify its output layer. The same ordering is used during Main Stage playback and in the exported movie. The stopped **Edit selection** preview described below temporarily brings your selection forward. If two overlapping regions share a number, the most recently assigned one is in front; equal assignments use lane order. Reassigning **1** brings the chosen region ahead of another layer-1 region. Within one lane and layer, remaining ties use the last overlapping region; different numbered layers can coexist within a lane.
+A **yellow outline** means selected for editing; the numbered badge and colored border identify its output layer. The same ordering is used during Main Stage playback and in the exported movie. The stopped **View selected clip** preview described below temporarily brings your selection forward. If two overlapping regions share a number, the most recently assigned one is in front; equal assignments use lane order. Reassigning **1** brings the chosen region ahead of another layer-1 region. Within one lane and layer, remaining ties use the last overlapping region; different numbered layers can coexist within a lane.
 
 Assignments survive splitting, trimming, copy/paste, Undo and save/reopen. Unassigned regions remain available behind numbered layers, so existing projects keep their previous appearance until you assign layers. A small foreground reveals the videos behind it. Number and editing shortcuts do not apply while you are typing in a text field.
 
@@ -100,17 +100,17 @@ The first nine lanes are numbered from top to bottom. Empty or muted camera choi
 
 ## Reorder camera lanes
 
-Drag the **grip and number beside a lane name** to another lane header. The insertion line indicates whether the lane will move above or below that header. You can cross several lanes in one drag. The header's right-click menu also provides **Move lane up/down**. Lane order saves with the project and supports Undo; the lane's regions, inputs, offsets and automation move together without changing their times. Live-switch numbers follow the new order. Explicit output layers remain assigned; automatic layers follow lane order.
+Drag the **grip and number beside a lane name** up or down to another lane; the pointer can be over the header or the region area. The insertion line indicates whether the lane will move above or below that header. You can cross several lanes in one drag. Hold near the top/bottom of the lane viewport to scroll, or press Escape to cancel. Release to commit one undoable move. The header's right-click menu also provides **Move lane up/down**. Lane order saves with the project and supports Undo; the lane's regions, inputs, offsets and automation move together without changing their times. Live-switch numbers follow the new order. Explicit output layers remain assigned; automatic layers follow lane order.
 
 ## Animate video framing
 
 Select a region, stop at the first desired position, set its framing, and press **M** or **Marker** in the timeline toolbar. Move the playhead to another position, add another marker, then change zoom, position or rotation. Once a clip has markers, framing edits update or add the pose at the current playhead; they no longer move every marker together. Each drag is one Undo step. Click a flag in the timeline to preview and edit that point while stopped. Animation plays in Main Stage and export, including after splits and trims.
 
-While stopped, **Edit selection** in Main Stage brings the selected region forward so you can frame it even underneath another video. This is a preview at times within that region, including muted or disabled selections; it does not change output layers or exports. Scrub with the ruler or click a marker to keep the selection while positioning automation. Turn **Edit selection** off to inspect the final composition. Starting playback always shows the actual output order. Click empty timeline space, the black margin outside the canvas, or the deselect icon beside **Edit selection** to clear the selection.
+While stopped, **View selected clip** in Main Stage brings the selected region forward so you can frame it even underneath another video. This is a preview at times within that region, including muted or disabled selections; it does not change output layers or exports. Scrub with the ruler or click a marker to keep the selection while positioning automation. Turn **View selected clip** off to inspect the final composition. Starting playback always shows the actual output order. Click empty timeline space, the black margin outside the canvas, or the deselect icon beside **View selected clip** to clear the selection.
 
 ## Automatic zoom and pan
 
-Select a region, or Shift-click several, then click the **wand (Motion)** in the timeline toolbar. Right-click **Motion…** opens the same panel. Choose zoom **In/Out** and/or a pan direction, including diagonals. **Subtle**, **Gentle** and **Bold** set starting amounts; the Zoom and Travel sliders let you refine them. Travel is a percentage of the canvas width/height, and pan describes the direction the camera looks (the image moves the opposite way).
+Select a region, or Shift-click several, then click the **Motion** button (wand icon) in the timeline toolbar. Right-click **Motion…** opens the same panel. Choose zoom **In/Out** and/or a pan direction, including diagonals. **Subtle**, **Gentle** and **Bold** set starting amounts; the Zoom and Travel sliders let you refine them. Travel is a percentage of the canvas width/height, and pan describes the direction the camera looks (the image moves the opposite way).
 
 Click or drag on the still preview to choose a zoom focal point, or press **Center**. The play button previews a four-second loop of the proposed framing on a still image; it does not start Logic. Each selected region receives a full move across its own current trimmed length. The preview shows the active region; applying also uses each other selected video's dimensions.
 
@@ -203,11 +203,13 @@ Earlier-build measurements: the synthetic 30 fps playback check delivered **51 d
 
 ## Verification
 
-This **0.9.0 test build** compiles for Intel/macOS 13+ and passes strict bundle signature verification. **56 distinct Swift checks passed**, including 12 new motion/model/store tests: directional and diagonal moves, focal anchors, aspect ratios, rotated edge coverage, affine export ramp geometry, combined curves, bounded marker counts, trim/split behavior, legacy decoding, atomic multi-selection changes, Undo/Redo and save/reopen.
+**83 Swift tests pass**, including actual MOV/MP4 rendering of automatic motion, independent sync offsets, multi-layer output, capture, editing, Undo/Redo and native lane drags with autoscroll and cancellation. The native session harness also verifies **playback with every lane disarmed**, paused-preview handoff, editor closure, R/Space forwarding, automatic disarming, restoration and simultaneous cameras.
 
-Rendered movie export and AU runtime validation remain **unverified in this build**. The current restricted test environment cannot provide working video/GPU services or register the AU; an unanimated export control and the already-installed 0.8.0 AU also fail there. The native panel's layout test passes, but its screenshot is incomplete under those graphics failures and is not visual confirmation. Test Motion in Logic and export a short section before relying on it for a full edit. See the matching `VERIFICATION.md` in the ZIP, or `docs/VERIFICATION-0.9.0.md` in the repository, for exact limits. Earlier release results are recorded separately in `docs/VERIFICATION-0.8.0.md`.
+AU 0.9.2 keeps its transport scheduling activity while a video project is open, so ordinary playback receives the same scheduling protection as armed recording. This activity survives closing the editor and ends when the project/session closes. It does not arm a lane or record video. Transport still uses Logic's positions; missing callbacks freeze the display instead of inventing motion. Playback diagnostics now include callback state and timer gaps even when disarmed.
 
-This local test package retains the exact working 0.8.0 capture helper; capture protocols and recording code have not changed. The 0.9.0 editor writes normal editable framing markers. The package is for **Intel Macs, macOS 13 or newer**, and remains locally signed, unsigned at installer level and not notarized.
+The **Motion** label is beside the timeline editing buttons and also appears in the region's right-click menu. **View selected clip** (previously Edit selection) changes only the stopped preview, to expose a selected clip under another layer; it is not a transport mode and does not change the export. It makes no visible difference when that clip is already on top.
+
+See `docs/VERIFICATION-0.9.2.md` (or `VERIFICATION.md` in the ZIP) for the full test record and limits. The local package retains the same user-confirmed 0.8.0 capture helper and its signing identity. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. Actual Logic playback after restarting still needs a user check; automated host tests do not replace that check.
 
 An old cut made before the 0.2.5 fixes may already contain an incorrect saved source start. The app cannot safely infer its intended content; redo an affected old cut from the original take. Original media remains intact.
 

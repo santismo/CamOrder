@@ -61,7 +61,8 @@ final class PluginSession: NSObject {
     private var timingWasDelayed = false
     private var lastDiagnosticTime = 0.0
     private var lastDiagnostic: [String: Any] = [:]
-    private var recordingActivity: NSObjectProtocol?
+    private(set) var transportActivity: NSObjectProtocol?
+    private var lastTickTime = 0.0
     private var securityScopedURL: URL?
     private var closing = false
     private var restoringPending = false
@@ -160,16 +161,24 @@ final class PluginSession: NSObject {
             restore()
         }
         configureRecorders()
-        COSetTransportInterest(bridge, store.hasOpenProject || store.hasArmedLane)
         let active = store.hasArmedLane || recorders.values.contains(where: \.active)
-        if active && recordingActivity == nil {
-            recordingActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Recording video with Logic Pro")
-        } else if !active, let activity = recordingActivity {
-            ProcessInfo.processInfo.endActivity(activity); recordingActivity = nil
+        // The editor clock and movie playback need the same scheduling protection
+        // as an armed capture. Releasing this token on disarm lets App Nap defer
+        // our main-run-loop timer while Logic's audio transport keeps running.
+        // Keep it for the open project, including with the editor closed, so we
+        // can notice the next Play. This does not prevent idle system sleep.
+        let needsTransport = store.hasOpenProject || active
+        COSetTransportInterest(bridge, needsTransport)
+        if needsTransport && transportActivity == nil {
+            transportActivity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Following Logic Pro video transport")
+        } else if !needsTransport, let activity = transportActivity {
+            ProcessInfo.processInfo.endActivity(activity); transportActivity = nil
         }
         var snapshot = COTransport()
         guard COReadTransport(bridge, &snapshot) else { return }
         let now = ProcessInfo.processInfo.systemUptime
+        let tickGap = lastTickTime == 0 ? 0 : now - lastTickTime
+        lastTickTime = now
         let freshAU = snapshot.valid != 0 && now - snapshot.lastRenderSeconds < 0.25
         let timecode = freshAU ? nil : logicLink.snapshot(now: now)
         let usingTimecode = timecode != nil
@@ -186,9 +195,15 @@ final class PluginSession: NSObject {
         let seconds = canAlign ? max(0, snapshot.seconds + clockOffset) : update.seconds
         lastDiagnostic = ["transportSource": usingTimecode ? "Logic Link" : "Audio Unit", "renderCount": snapshot.renderCount,
             "callbackFailures": snapshot.callbackFailures, "reportedSeconds": snapshot.seconds, "callbackAge": now - snapshot.lastRenderSeconds,
+            "callbackStatus": snapshot.callbackStatus, "callbackVersion": snapshot.callbackVersion,
+            "reportedPlaying": reportedPlaying, "followingPlaying": update.playing, "tickGap": tickGap,
+            "transportSchedulingActive": transportActivity != nil,
             "armedLanes": store.project.timeline.lanes.filter(\.isArmed).count, "inputs": recorders.count,
             "activeTakes": store.pendingTakes.count]
-        if store.hasArmedLane && now - lastDiagnosticTime >= 2 { logEvent("armed_transport_status", seconds: seconds); lastDiagnosticTime = now }
+        if store.hasOpenProject && now - lastDiagnosticTime >= (active || update.playing ? 2 : 10) {
+            logEvent(store.hasArmedLane ? "armed_transport_status" : "playback_transport_status", seconds: seconds)
+            lastDiagnosticTime = now
+        }
         if now - lastDisplayTime >= 1.0 / 30 {
             if freshAU, snapshot.musicalTimeValid != 0 {
                 store.receiveHostGrid(seconds: snapshot.seconds, beat: snapshot.beat, tempo: snapshot.tempo)
@@ -331,7 +346,7 @@ final class PluginSession: NSObject {
         guard !closing else { return }
         closing = true
         COSetTransportInterest(bridge, false)
-        if let activity = recordingActivity { ProcessInfo.processInfo.endActivity(activity); recordingActivity = nil }
+        if let activity = transportActivity { ProcessInfo.processInfo.endActivity(activity); transportActivity = nil }
         shutdownHold = self
         recorders.values.forEach { stop($0, at: lastSeconds) }
         store.unarmAllLanes()

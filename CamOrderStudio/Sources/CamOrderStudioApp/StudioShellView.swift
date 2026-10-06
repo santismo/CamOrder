@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.9.0").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.9.2").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -781,9 +781,9 @@ private struct PlaybackPreviewPane: View {
             HStack {
                 SectionHeader("Main Stage")
                 if store.selectedClipId != nil, !isPlaying {
-                    Toggle("Edit selection", isOn: $previewSelection)
+                    Toggle("View selected clip", isOn: $previewSelection)
                         .toggleStyle(.button).controlSize(.mini)
-                        .help("Bring the selected region forward for framing only. Playback and export keep the output layers.")
+                        .help("While paused, bring the selected region forward to adjust it. This changes only the preview, not layers or export. Turn off to view the final composition.")
                     Button { store.setRegionSelection([]) } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.plain).help("Deselect region and show output")
                 }
@@ -1757,6 +1757,7 @@ private struct TimelineView: View {
     var controlsAtBottom = false
     @State private var followedSeconds = 0.0
     @State private var showMotion = false
+    @StateObject private var laneReorder = LaneReorderController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1768,9 +1769,9 @@ private struct TimelineView: View {
                         .font(.caption.bold())
                         .frame(width: 150, height: 28, alignment: .leading)
                     ForEach(store.project.timeline.lanes) { lane in
-                        LaneHeader(lane: lane)
+                        LaneHeader(lane: lane, reorder: laneReorder)
                             .frame(width: 150, height: 56, alignment: .leading)
-                            .modifier(LaneReorderTarget(store: store, laneID: lane.id))
+                            .modifier(LaneReorderTarget(controller: laneReorder, laneID: lane.id))
                     }
                     if store.project.audio.masteredAudioFile != nil { Text("Master Audio")
                         .font(.caption.bold())
@@ -1917,6 +1918,7 @@ private struct TimelineView: View {
                                                 .offset(x: (pending.startSeconds + offset) * secondsToPixels)
                                         }
                                     }
+                                    .modifier(LaneReorderTarget(controller: laneReorder, laneID: lane.id, registerGeometry: false))
                                     .zIndex(regionDragZIndex(for: lane))
                                 }
                                 if store.project.audio.masteredAudioFile != nil { Rectangle()
@@ -1973,7 +1975,7 @@ private struct TimelineView: View {
                 Divider()
                     .frame(height: 18)
                 HStack(spacing: 4) {
-                    Button { showMotion = true } label: { Image(systemName: "wand.and.stars") }
+                    Button { showMotion = true } label: { Label("Motion", systemImage: "wand.and.stars") }
                         .help("Motion: automatic zoom and pan for selected regions")
                         .accessibilityLabel("Motion")
                         .disabled(store.selectedClipIDs.isEmpty || store.isApplyingMotion)
@@ -2344,12 +2346,13 @@ private final class PlaybackPlayerNSView: NSView {
 private struct LaneHeader: View {
     @EnvironmentObject private var store: ProjectStore
     let lane: VideoLane
+    let reorder: LaneReorderController
     @State private var showOffset = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
-                LaneReorderGrip(laneID: lane.id, number: laneNumber, projectPath: store.document?.folderURL.path ?? "")
+                LaneReorderGrip(laneID: lane.id, number: laneNumber, store: store, controller: reorder)
                 LaneNameEditor(name: lane.name) { store.renameLane(lane.id, name: $0) }.frame(height: 17)
             }
             if let inputs = store.captureInputs {

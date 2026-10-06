@@ -49,6 +49,7 @@ final class MotionStoreTests: XCTestCase {
         let view = NSHostingView(rootView: MotionPane().environmentObject(store).preferredColorScheme(.dark))
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 370, height: 630), styleMask: .borderless, backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = .windowBackgroundColor
         window.contentView = view
         window.orderFront(nil)
         view.setFrameSize(CGSize(width: 370, height: 630))
@@ -56,9 +57,12 @@ final class MotionStoreTests: XCTestCase {
         try await Task.sleep(nanoseconds: 1_000_000_000)
         view.layoutSubtreeIfNeeded()
         XCTAssertEqual(view.bounds.size, CGSize(width: 370, height: 630))
-        if let path = ProcessInfo.processInfo.environment["CAMORDER_MOTION_SCREENSHOT"], let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
-            view.cacheDisplay(in: view.bounds, to: image)
-            try image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        if let path = ProcessInfo.processInfo.environment["CAMORDER_MOTION_SCREENSHOT"] {
+            // WindowServer includes native control layers that cacheDisplay omits.
+            // Capture only this test's own window, never the user's desktop.
+            if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
+                try NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            }
         }
         window.contentView = nil
     }

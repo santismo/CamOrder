@@ -15,4 +15,8 @@ xcrun swiftc -swift-version 5 -O -target "$arch-apple-macos13.0" -parse-as-libra
   "$build"/*-"$arch".o "$root/.build/au-tests/session-host.o" \
   -Xlinker -lc++ -framework AppKit -framework AudioToolbox -framework AudioUnit -framework CoreAudio -framework CoreMIDI -framework AVFoundation -framework CoreMediaIO \
   -o "$root/.build/au-tests/session-integration"
-CAMORDER_DISABLE_AUTOPREVIEW_FOR_TESTS=1 "$root/.build/au-tests/session-integration" "$root/.build/au-tests/editor-canvas.png"
+if [[ "${CAMORDER_SESSION_HEADLESS:-0}" == 1 ]]; then
+  CAMORDER_DISABLE_AUTOPREVIEW_FOR_TESTS=1 "$root/.build/au-tests/session-integration"
+else
+  CAMORDER_DISABLE_AUTOPREVIEW_FOR_TESTS=1 "$root/.build/au-tests/session-integration" "$root/.build/au-tests/editor-canvas.png"
+fi

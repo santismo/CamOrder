@@ -1,6 +1,6 @@
 # CamOrder Studio Audio Unit — 0.8.0 development build
 
-CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport; no timecode or MIDI routing is needed for the working Stereo Out setup.
+CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport without MIDI routing, but depends on Logic continuing to process that channel. For silent sections or video-only editing, read [Transport and silent playback](#transport-and-silent-playback).
 
 ## Install and record
 
@@ -177,13 +177,38 @@ Captured takes are video-only: they do not record the microphone or Logic’s mi
 
 Movie import and placement are manual; this Audio Unit does not change Logic’s movie track. Export defaults to a silent movie for use with Logic’s existing audio. Existing exports survive a failed render, and source-media destinations are rejected.
 
+## Transport and silent playback
+
+**The current tradeoff:** CamOrder follows Logic while Logic supplies Audio Unit timing. In testing with Logic, playback followed while audio was passing through Stereo Out, but could freeze in silent or empty sections when Logic stopped processing the plug-in. Keeping the editor open does not guarantee updates. CamOrder holds its last confirmed position instead of guessing how far Logic has moved, then follows again when timing resumes. This is separate from camera delay; changing a lane/project millisecond offset will not fix a frozen playhead.
+
+For music-based editing, use the normal Stereo Out setup while audio plays. For a silent movie or footage-only project, choose the optional MIDI connection below, or try the [quiet-audio workaround](#video-only-editing-without-midi). Leave CamOrder lanes **disarmed** when reviewing existing footage; arming is for capturing a new take, not a playback setting.
+
 ## Optional transport fallback
 
-The previous prominent “Connect Logic” setup is removed from the normal workflow. **AU timing has priority** whenever Logic is actively processing CamOrder on Stereo Out. An optional fallback remains under **View → Optional transport fallback…** to preserve existing connections and cover hosts/channels that stop sending AU timing.
+**MTC (MIDI Time Code)** supplies the running time position. **MMC (MIDI Machine Control)** supplies transport commands such as Play, Stop and Locate. Enable both for the Logic Link setup. They work together as a timing fallback, rather than separate editing modes. No timecode-audio track is needed.
 
-Only if you encounter that condition, route **MTC and MMC** from Logic’s Project Settings → Synchronization → MIDI to **CamOrder Logic Link**, and enable Transmit MIDI Machine Control. Keep Logic in Internal Sync. Match CamOrder’s fallback project-start hour to Logic’s bar-1 SMPTE time (usually 01:00:00:00). Existing routing may remain; it does not override fresh AU transport.
+1. Open a CamOrder project and choose **View → Optional transport fallback…**.
+2. In Logic, open **File → Project Settings → Synchronization → MIDI**. Set an unused **Destination** row to **CamOrder Logic Link**. If it is missing, leave CamOrder loaded and reopen the settings.
+3. Check **MTC** and **MMC** on that row, and enable **Transmit MIDI Machine Control (MMC)**. MIDI Clock is a different protocol and is not required for this connection. Keep Logic in **Internal Sync**; Logic sends timing and CamOrder follows it. See [Apple’s MIDI synchronization settings](https://support.apple.com/en-ae/guide/logicpro/lgcp72142361/10.7/mac/11.0).
+4. In CamOrder’s fallback panel, match **Logic project start** to Logic’s bar-1 SMPTE hour in **Synchronization → General**, commonly **01:00:00:00**. This aligns project origins; it is not the camera’s millisecond sync adjustment.
+5. Save both projects. With all video lanes disarmed, test Play and Stop across an empty section, start from another position, then repeat with the editor closed and reopened. Confirm CamOrder follows before using this setup for a take.
 
-Stopped cursor movement can only be followed when Logic sends a position report. The optional MIDI path supports 24, 25, 29.97 drop-frame and 30 fps, with whole-hour project origins. It is not sample-accurate video lock. There is no timecode audio track to configure.
+**Fresh AU timing has priority.** CamOrder automatically uses Logic Link when AU timing becomes stale; existing MIDI routing does not override fresh AU positions. The connection can supply timing without audio reaching CamOrder. The automated MIDI fallback test passes, but this specific setup still needs checking in your Logic session.
+
+Stopped cursor movement can only be followed when Logic sends a position report. The MIDI path supports 24, 25, 29.97 drop-frame and 30 fps, with whole-hour project origins. It is not sample-accurate video lock. Camera capture delay still uses the separate [Sync Calculator](#sync-calculator) and lane/project offsets.
+
+## Video-only editing without MIDI
+
+A continuous, very quiet **nonzero audio signal** may keep Logic processing Stereo Out while you edit a silent movie. This is a workaround to try, **not a verified fix or a guaranteed dB threshold**. Ordinary audio playback has been confirmed; an almost inaudible signal has not. Audibility and Logic’s processing behavior depend on the source, routing and session.
+
+1. Add a dedicated Logic audio track named **CamOrder playback guide — exclude from final mix**, routed to the Stereo Out that contains CamOrder.
+2. Put a continuous tone or noise recording on it and loop/extend it across the entire editing range, including gaps before and after your video. A file containing digital silence is not a substitute. Lower the track to a very quiet level, keeping its fader above **−∞**.
+3. Keep the track enabled and unmuted, and keep CamOrder active. Avoid gaps, gates or other processing that removes the signal before CamOrder. Muting, soloing it out or routing it elsewhere can defeat the workaround.
+4. Leave video lanes disarmed and test Logic Play/Stop through the longest otherwise silent section, including after closing/reopening the editor. If CamOrder still freezes, do not assume a quieter signal will help; use the optional MTC/MMC connection instead.
+
+Alternatively, **Utility → Test Oscillator** on the dedicated track can provide a continuous signal. Turn down your monitoring before inserting it: it starts generating immediately. Lower its **Level** before restoring monitoring, then perform the same playback check. See [Apple’s Test Oscillator guide](https://support.apple.com/en-ca/guide/logicpro/lgcef2d8c9eb/12.2/mac/15.6).
+
+**Keep the guide signal out of the finished audio.** It is still audio even when you cannot hear it, and may be included in a Logic bounce. Disable/remove it before making a final audio master. CamOrder’s movie export defaults to video-only and does not need Logic’s transport running, so the guide signal is unnecessary for export. If you import a bounced master into CamOrder, use one made without the guide signal.
 
 ## Performance changes
 

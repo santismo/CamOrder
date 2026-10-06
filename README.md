@@ -26,7 +26,9 @@ CamOrder runs as an Audio Unit effect. Use one instance on Stereo Out for the wh
 
 The installer is unsigned and not notarized. macOS may require approval in **System Settings → Privacy & Security** after opening it; follow [Apple’s instructions](https://support.apple.com/102445) only if you trust the download.
 
-Normal Stereo Out operation uses Logic's Audio Unit transport: no MIDI, MTC or timecode-audio routing is required. See the [recording walkthrough](https://santismo.github.io/CamOrder/#recording) for audio-track and video-lane arming, or the [guide](CamOrderStudio/README-AU.md) for permissions, transport fallback and troubleshooting.
+Normal Stereo Out operation uses Logic's Audio Unit transport without MIDI routing, **while Logic continues processing the channel**. In silent or empty sections, Logic can stop supplying timing and CamOrder’s playhead may hold until processing resumes. For silent-movie editing, the [user guide](CamOrderStudio/README-AU.md#transport-and-silent-playback) covers the optional **MTC + MMC** connection and a very quiet, nonzero audio workaround to try. The quiet-signal method has no verified dB threshold; remove that signal before bouncing final audio. CamOrder’s video-only export does not need it.
+
+See the [recording walkthrough](https://santismo.github.io/CamOrder/#recording) for audio-track and video-lane arming, or the [guide](CamOrderStudio/README-AU.md) for permissions, setup and troubleshooting.
 
 ## One camera or several
 

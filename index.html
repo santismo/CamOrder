@@ -279,7 +279,7 @@
           <li>Open the project menu beside <strong>CamOrder</strong>, choose <strong>New Project…</strong>, and save the CamOrder project alongside your Logic project. Keep the whole <strong>.camorderstudio</strong> folder when moving or sharing it; it contains the video media.</li>
         </ol>
         <p>Then follow the <a href="#recording">recording steps below</a> to choose cameras and start a take.</p>
-        <p>No MIDI or timecode-audio routing is needed for normal Stereo Out operation. Audio passes through unchanged; recorded takes are video-only. Import a bounced master if you want audio in the exported movie.</p>
+        <p>Normal playback follows Logic without MIDI routing while Logic processes Stereo Out. During silence, timing can pause; see <a href="#silent-playback">editing through silence</a> below. Audio passes through unchanged; recorded takes are video-only. Import a bounced master if you want audio in the exported movie.</p>
         <p><a href="https://github.com/santismo/CamOrder/releases/latest/download/CamOrder-Studio-Installer-Intel.pkg">Direct installer download</a> · <a href="https://github.com/santismo/CamOrder/releases/latest">ZIP alternative &amp; release notes</a></p>
         <p class="compat"><strong>Intel Mac · macOS 13+.</strong> Development build; the installer is unsigned and not notarized. macOS may require approval in <strong>System Settings → Privacy &amp; Security</strong> after you first open it. Follow <a href="https://support.apple.com/102445">Apple’s instructions</a> only if you trust the download. Apple silicon source builds have not been validated. See the <a href="https://github.com/santismo/CamOrder/blob/main/CamOrderStudio/README-AU.md">user guide</a> for compatibility and permissions.</p>
       </section>
@@ -297,6 +297,23 @@
         </ol>
         <p class="note">To film an app window, choose <strong>Window (choose…) → Choose window…</strong> in Live Inputs and confirm the window in the macOS picker (macOS 14+). For part of the main screen, choose <strong>Screen region</strong>, then <strong>Show region → Apply</strong>. Live Inputs previews the source; Main Stage displays your recorded timeline regions.</p>
         <p class="note">For the next camera take, start with Logic stopped and its playhead at the intended position. Automatic repeated cycle takes are not supported. Use the <a href="#camera-sync">camera sync guide below</a> to measure and correct a consistent camera delay.</p>
+      </section>
+      <section class="section calibration" id="silent-playback" aria-labelledby="silent-playback-title">
+        <div class="eyebrow">Silent sections &amp; video-only projects</div>
+        <h2 id="silent-playback-title">Editing through silence.</h2>
+        <p class="lead">CamOrder follows Logic while Logic supplies Audio Unit timing. If Logic stops processing Stereo Out during silence, CamOrder’s playhead can hold until timing resumes. Keeping the plug-in window open does not guarantee updates.</p>
+        <div class="sync-example">
+          <h3>Optional MTC + MMC connection</h3>
+          <p><strong>MTC supplies the running time; MMC supplies transport commands.</strong> In Logic’s <strong>File → Project Settings → Synchronization → MIDI</strong>, choose <strong>CamOrder Logic Link</strong> as a Destination, check <strong>MTC</strong> and <strong>MMC</strong>, and enable <strong>Transmit MIDI Machine Control</strong>. Keep Logic in <strong>Internal Sync</strong>.</p>
+          <p>In CamOrder, open <strong>View → Optional transport fallback…</strong> and match the project-start hour to Logic’s bar-1 SMPTE time. Fresh AU timing takes priority; the MIDI connection supplies a fallback when it stops. Test Play/Stop through an empty section before relying on it. These protocols work together, with no timecode-audio track required.</p>
+        </div>
+        <div class="sync-example">
+          <h3>Prefer to work without MIDI?</h3>
+          <p>You can try a dedicated Logic audio track containing a continuous tone or noise loop, turned down to a very quiet but <strong>nonzero</strong> level. Route it through the Stereo Out containing CamOrder and cover the whole editing range. Keep it unmuted and above −∞; gaps, gates or soloing it out can defeat the workaround.</p>
+          <p>This is an <strong>unverified workaround, with no guaranteed dB setting</strong>. Leave CamOrder’s video lanes disarmed and test through a long otherwise silent section. Very quiet audio is still audio: exclude the guide track from final Logic bounces. CamOrder’s video-only export does not need the signal or Logic playback running; any imported audio master should be made without it.</p>
+        </div>
+        <p class="note">For ordinary music sessions, continue with the normal Stereo Out setup while audio plays. Arm video lanes only for new captures. A camera’s millisecond sync offset corrects picture timing; it does not fix a frozen playhead.</p>
+        <a href="https://github.com/santismo/CamOrder/blob/main/CamOrderStudio/README-AU.md#transport-and-silent-playback">Read the transport setup and quiet-audio guide →</a>
       </section>
       <section class="section calibration" id="camera-sync" aria-labelledby="sync-title">
         <div class="eyebrow">Fine-tune your camera sync</div>

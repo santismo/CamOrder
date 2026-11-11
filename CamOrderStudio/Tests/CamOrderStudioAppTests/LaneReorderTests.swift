@@ -96,7 +96,15 @@ final class LaneReorderTests: XCTestCase {
         XCTAssertTrue(root.hitTest(root.superview?.convert(start, from: nil) ?? start) === grip)
         send(.leftMouseDown, at: start, fixture: fixture)
         send(.leftMouseDragged, at: end, fixture: fixture)
-        try await Task.sleep(nanoseconds: 1_300_000_000)
+        // Wait for the actual scroll destination; decoder/encoder warm-up in
+        // other tests can delay timer delivery without breaking the gesture.
+        let deadline = Date().addingTimeInterval(4)
+        while Date() < deadline {
+            if let target = controller.destination,
+               let index = fixture.store.project.timeline.lanes.firstIndex(where: { $0.id == target.laneID }),
+               index - 1 + (target.after ? 1 : 0) > 4 { break }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
         XCTAssertNotNil(controller.destination)
         send(.leftMouseUp, at: end, fixture: fixture)
         XCTAssertGreaterThan(try XCTUnwrap(fixture.store.project.timeline.lanes.firstIndex(where: { $0.id == "lane1" })), 4)

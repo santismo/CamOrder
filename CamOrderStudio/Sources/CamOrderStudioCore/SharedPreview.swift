@@ -26,11 +26,12 @@ final class SharedPreview: @unchecked Sendable {
         memory = mapped
     }
     deinit { munmap(memory, Self.size); Darwin.close(fd) }
-    func publish(_ pixel: CVPixelBuffer, context: CIContext) {
+    func publish(_ pixel: CVPixelBuffer, context: CIContext, quality: PreviewQuality = .full) {
         guard writable, flock(fd, LOCK_EX | LOCK_NB) == 0 else { return }
         defer { flock(fd, LOCK_UN) }
         let source = CIImage(cvPixelBuffer: pixel)
-        let scale = min(1, CGFloat(Self.maxWidth) / source.extent.width, CGFloat(Self.maxHeight) / source.extent.height)
+        let limit = quality.liveSize
+        let scale = min(1, limit.width / source.extent.width, limit.height / source.extent.height)
         let width = Int(source.extent.width * scale), height = Int(source.extent.height * scale)
         guard width > 0, height > 0 else { return }
         let image = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -65,6 +66,7 @@ final class PreviewPublisher: @unchecked Sendable {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let shared: SharedPreview
     private var lastTimestamp = -Double.infinity // capture queue only
+    var quality: PreviewQuality = .balanced // capture queue only
     init(url: URL) throws { shared = try SharedPreview(url: url, writable: true) }
     func offer(_ pixel: CVPixelBuffer, timestamp: Double) {
         guard timestamp.isFinite else { return }
@@ -73,8 +75,9 @@ final class PreviewPublisher: @unchecked Sendable {
         // Admit 30-fps sources without rounding a 33.333-ms interval down to 15 fps.
         guard timestamp - lastTimestamp >= 1.0 / 35.0, gate.wait(timeout: .now()) == .success else { return }
         lastTimestamp = timestamp
+        let quality = quality
         queue.async { [self] in
-            shared.publish(pixel, context: context)
+            shared.publish(pixel, context: context, quality: quality)
             gate.signal()
         }
     }

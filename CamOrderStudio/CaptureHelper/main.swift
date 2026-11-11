@@ -48,6 +48,7 @@ final class CaptureHelperDelegate: NSObject, NSApplicationDelegate {
     private func handle(_ command: CaptureCommand) {
         switch command.action {
         case "refresh": engine.refreshDevices()
+        case "previewQuality": if let raw = command.value, let quality = PreviewQuality(rawValue: raw) { engine.setPreviewQuality(quality) }
         case "select": if let id = command.value { engine.selectDevice(id: id) }
         case "preview": engine.startPreview()
         case "chooseWindow": engine.chooseWindow()

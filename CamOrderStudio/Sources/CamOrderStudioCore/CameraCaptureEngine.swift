@@ -19,6 +19,7 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
     public let previewSession: AVCaptureSession
     public private(set) var screenCropRect: CGRect?
     public let previewFrames = CapturePreviewFrames()
+    public private(set) var previewQuality: PreviewQuality = .balanced
     private var previewWanted = false
     private var didAutoPreview = false
     public var usesCaptureHelper: Bool { remote != nil }
@@ -271,9 +272,18 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
         worker.queue.async { [worker] in worker.finish() }
     }
     private var hasPreviewDestination = false
+    public func setPreviewQuality(_ quality: PreviewQuality) {
+        previewQuality = quality
+        if let remote { remote.send(CaptureCommand("previewQuality", value: quality.rawValue)); return }
+        worker.queue.async { [worker] in worker.previewPublisher?.quality = quality }
+    }
     public func setPreviewImageDestination(_ url: URL) {
         hasPreviewDestination = true
-        worker.queue.async { [worker] in worker.previewPublisher = try? PreviewPublisher(url: url) }
+        let quality = previewQuality
+        worker.queue.async { [worker] in
+            worker.previewPublisher = try? PreviewPublisher(url: url)
+            worker.previewPublisher?.quality = quality
+        }
     }
     public func reportCaptureFailure(_ message: String, url: URL) {
         isRecording = false; isFinishingRecording = false

@@ -17,6 +17,7 @@ public struct CaptureStatus: Codable {
     public var recordedPath: String?
     public var firstFrameHostTime: UInt64?
     public var duration: Double
+    public var previewQuality: String?
     public var acknowledgedSequence: Int = 0
     public var updated: Double
     @MainActor public init(engine: CameraCaptureEngine) {
@@ -24,6 +25,7 @@ public struct CaptureStatus: Codable {
         previewing = engine.isPreviewing; recording = engine.isRecording; finishing = engine.isFinishingRecording
         error = engine.lastErrorMessage; recordedPath = engine.lastRecordedFileURL?.path
         firstFrameHostTime = engine.lastRecordingStartedHostTime; duration = engine.lastRecordingDuration
+        previewQuality = engine.previewQuality.rawValue
         updated = ProcessInfo.processInfo.systemUptime
     }
 }

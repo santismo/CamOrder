@@ -14,10 +14,14 @@ final class LaneCaptureInputs: ObservableObject {
     @Published private(set) var sourceIDs: [String] = []
     private var crops: [String: [Double]] = [:]
     private var regions: [String: CaptureRegionController] = [:]
+    private var qualityObservation: AnyCancellable?
 
     init(store: ProjectStore, discovery: CameraCaptureEngine, createsEngines: Bool = true, defaultOverride: String? = nil) {
         self.store = store; self.discovery = discovery
         self.createsEngines = createsEngines; self.defaultOverride = defaultOverride
+        qualityObservation = PreviewPreferences.shared.$quality.removeDuplicates().sink { [weak self] quality in
+            self?.engines.values.forEach { $0.setPreviewQuality(quality) }
+        }
     }
     var defaultSourceID: String? {
         let id = store.project.defaultCaptureSourceID ?? defaultOverride ?? discovery.availableDevices.first(where: { $0.kind == .camera })?.id
@@ -58,6 +62,7 @@ final class LaneCaptureInputs: ObservableObject {
             if engines[id] == nil {
                 let engine = CameraCaptureEngine(useCaptureHelper: true, automaticallyPreviewsDefaultSource: false)
                 engines[id] = engine
+                engine.setPreviewQuality(PreviewPreferences.shared.quality)
                 if let crop, let rect = Self.rect(crop) { engine.setScreenCropRect(rect); crops[id] = crop }
                 engine.selectDevice(id: id)
             } else if let engine = engines[id], !engine.isRecording, !engine.isFinishingRecording, crops[id] != crop {

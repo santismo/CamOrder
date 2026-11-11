@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.9.2 development build
+# CamOrder Studio Audio Unit — 0.10.0 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport without MIDI routing, but depends on Logic continuing to process that channel. For silent sections or video-only editing, read [Transport and silent playback](#transport-and-silent-playback).
 
@@ -228,15 +228,37 @@ Earlier-build measurements: the synthetic 30 fps playback check delivered **51 d
 
 ## Verification
 
-**83 Swift tests pass**, including actual MOV/MP4 rendering of automatic motion, independent sync offsets, multi-layer output, capture, editing, Undo/Redo and native lane drags with autoscroll and cancellation. The native session harness also verifies **playback with every lane disarmed**, paused-preview handoff, editor closure, R/Space forwarding, automatic disarming, restoration and simultaneous cameras.
+The 0.9.2 baseline passed **83 Swift tests**, including actual MOV/MP4 rendering of automatic motion, independent sync offsets, multi-layer output, capture, editing, Undo/Redo and native lane drags with autoscroll and cancellation. The native session harness also verifies **playback with every lane disarmed**, paused-preview handoff, editor closure, R/Space forwarding, automatic disarming, restoration and simultaneous cameras.
 
 AU 0.9.2 keeps its transport scheduling activity while a video project is open, so ordinary playback receives the same scheduling protection as armed recording. This activity survives closing the editor and ends when the project/session closes. It does not arm a lane or record video. Transport still uses Logic's positions; missing callbacks freeze the display instead of inventing motion. Playback diagnostics now include callback state and timer gaps even when disarmed.
 
 The **Motion** label is beside the timeline editing buttons and also appears in the region's right-click menu. **View selected clip** (previously Edit selection) changes only the stopped preview, to expose a selected clip under another layer; it is not a transport mode and does not change the export. It makes no visible difference when that clip is already on top.
 
-See the [0.9.2 verification record](../docs/VERIFICATION-0.9.2.md) (or `VERIFICATION.md` in the ZIP) for the full test record and limits. The local package retains the same user-confirmed 0.8.0 capture helper and its signing identity. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. The Logic follow-up confirmed playback while audio passes through Stereo Out, with the silent-section limitation described above. Automated host tests do not establish continuous transport in silent Logic sessions, and the quiet-audio workaround remains unverified.
+See the [0.10.0 verification record](../docs/VERIFICATION-0.10.0.md) (or `VERIFICATION.md` in the ZIP) for this release’s test record and limits. The [0.9.2 record](../docs/VERIFICATION-0.9.2.md) documents the prior playback and lane fixes retained in this build. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. The Logic follow-up confirmed playback while audio passes through Stereo Out, with the silent-section limitation described above. Automated host tests do not establish continuous transport in silent Logic sessions, and the quiet-audio workaround remains unverified.
 
 An old cut made before the 0.2.5 fixes may already contain an incorrect saved source start. The app cannot safely infer its intended content; redo an affected old cut from the original take. Original media remains intact.
+
+## Preview quality
+
+The **Preview** menu under Main Stage controls display quality in the AU. **Balanced** is the default and the choice is remembered across Logic sessions. This is a preview preference, not a project/export setting.
+
+| Mode | Live Inputs maximum | Prepared playback maximum |
+| --- | --- | --- |
+| Full | 960 × 640 (previous live-preview limit) | Original file |
+| Balanced | 640 × 480 | 1280 × 720 H.264 preview copy |
+| Light | 320 × 240 | 640 × 480 H.264 preview copy |
+
+Aspect ratio is preserved, so 16:9 live frames are 960 × 540, 640 × 360, and 320 × 180 respectively. The existing live preview cadence (about 30 fps for a 30 fps source) is retained. Changing modes updates all camera helpers without restarting a capture session. The recording encoder still receives the original full-size samples.
+
+For lighter **recorded playback**, stop playback, disarm the video lanes, choose Balanced or Light, and click **Prepare playback**. It processes the project's video files one at a time. Existing ready copies are reused, and small originals need no conversion. Unprepared or failed media plays from the original until preparation succeeds. The status reports readiness and failures; preparation can be retried. Switching to Full immediately uses originals.
+
+Preparation stops when playback starts, a lane arms, a take is active, movie export starts, or Main Stage closes. Completed copies are kept. Preparation is deliberately manual so encoding these copies does not add surprise CPU load during recording. It changes neither project media paths nor the files used for final movie export. Source trims, sync offsets, portrait orientation, framing and motion continue to use the same source time.
+
+Preview copies use disk space in `~/Library/Caches/com.santismo.CamOrderStudio/Preview-v1/`. They are disposable: quit Logic before deleting that folder in Finder to recover the space, then prepare again if wanted. Changes to a source's path, size or modification date invalidate its old cache entry. The cache is local to this Mac and is not included in the project.
+
+Three simultaneous full-quality recordings still require three encoders. These settings reduce preview work; they do not guarantee a particular overall CPU reduction or cure missing Logic transport callbacks. The user reports that enabling Logic's metronome improves playback on their setup; this is recorded as a practical observation, not a general transport fix.
+
+This release updates the capture helper as well as the AU. Its local ad-hoc signing identity changes, so macOS may ask for Camera or Screen Recording permission again. Installation backs up the previous component and does not close Logic.
 
 ## Build and uninstall
 

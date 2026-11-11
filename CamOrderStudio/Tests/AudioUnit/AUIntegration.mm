@@ -156,6 +156,28 @@ int main(int argc, char **argv) {
                 "take anchor remains correct after the first block");
         }
         puts("PASS: stale/future startup render clocks fall back to the current host clock; precise valid timestamps are retained");
+        // The render clock may be correct while the first timeline position is
+        // wrong. Reproduce the observed 18.62 -> 4.8 second startup correction.
+        for (double initialPosition : {18.622743764, 158.569773243, 0.0}) {
+            auto processPosition = [&](double position, bool playing) {
+                host.playing = playing; host.sample = position * 96000;
+                failedTime.mSampleTime += 64; failedTime.mHostTime = mach_absolute_time();
+                check(AudioUnitProcess(unit, &failedFlags, &failedTime, 64, (AudioBufferList *)&silentBuffers), "startup timeline correction");
+            };
+            processPosition(4.8, false);
+            processPosition(initialPosition, true);
+            require(readTransport(bridge, &snapshot) && !snapshot.startAnchorValid,
+                "the first Play position must not immediately become a capture anchor");
+            const double stableStart = mach_absolute_time() * tickSeconds;
+            for (int i = 0; i < 20; ++i) {
+                processPosition(4.8 + mach_absolute_time() * tickSeconds - stableStart, true);
+                [NSThread sleepForTimeInterval:0.005];
+            }
+            require(readTransport(bridge, &snapshot) && fabs(snapshot.startSeconds - 4.8) < 0.05,
+                "take-start position must follow the settled timeline, not the first Play outlier");
+            require(snapshot.startAnchorValid, "coherent playback makes the corrected anchor available");
+        }
+        puts("PASS: startup timeline outliers are corrected before the capture anchor is used");
         check(AudioUnitUninitialize(unit), "uninitialize callback test");
         puts("PASS: transport after input; v1/v2 fallback; callback failures preserve state; silent audio stays zero; AudioUnitProcess follows transport");
         CFPropertyListRef state = nullptr; UInt32 size = sizeof(state);

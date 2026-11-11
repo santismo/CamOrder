@@ -4,6 +4,7 @@
 #import <AppKit/AppKit.h>
 #import <AudioUnit/AUCocoaUIView.h>
 #include <atomic>
+#include <algorithm>
 #include <mutex>
 #include <cstring>
 #include <cmath>
@@ -16,7 +17,7 @@ struct COBridge {
     std::atomic<uint64_t> sequence{0}, revision{0}, renderCount{0}, callbackFailures{0};
     std::atomic<double> lastAttemptSeconds{0};
     std::atomic<int32_t> callbackStatus{0};
-    std::atomic<uint32_t> callbackVersion{0}, musicalTimeValid{0};
+    std::atomic<uint32_t> callbackVersion{0}, musicalTimeValid{0}, startAnchorValid{0};
     std::atomic<double> seconds{0}, tempo{120}, beat{0}, hostSeconds{0}, lastRenderSeconds{0};
     std::atomic<double> startSeconds{0}, startHostSeconds{0};
     std::atomic<uint32_t> frames{0}, playing{0}, recording{0}, valid{0};
@@ -44,6 +45,7 @@ bool COReadTransport(COBridge *b, COTransport *s) {
         s->renderCount = b->renderCount.load(); s->callbackFailures = b->callbackFailures.load();
         s->lastAttemptSeconds = b->lastAttemptSeconds.load(); s->callbackStatus = b->callbackStatus.load();
         s->callbackVersion = b->callbackVersion.load(); s->musicalTimeValid = b->musicalTimeValid.load();
+        s->startAnchorValid = b->startAnchorValid.load();
         if (sequence == b->sequence.load()) return true;
     }
     return false;
@@ -87,6 +89,7 @@ class CamOrderStudioAU : public ausdk::AUEffectBase {
     COBridge *bridge = new COBridge;
     double ticksToSeconds = 0;
     bool renderingViaRender = false; // audio thread only
+    double anchorStableSince = 0; // audio thread only
 public:
     explicit CamOrderStudioAU(AudioComponentInstance instance) : AUEffectBase(instance, true) {
         CreateElements();
@@ -146,12 +149,17 @@ public:
         bridge->callbackVersion = version;
         if (result != noErr || !std::isfinite(sample)) {
             ++bridge->callbackFailures;
+            bridge->startAnchorValid = false;
+            anchorStableSince = 0;
             ++bridge->sequence;
             return; // Preserve the last good position; failure is not a Stop command.
         }
         const auto musicalResult = CallHostBeatAndTempo(&beat, &tempo);
         bridge->musicalTimeValid = musicalResult == noErr && std::isfinite(beat) && std::isfinite(tempo) && tempo > 0;
-        bridge->seconds = sample / GetSampleRate();
+        const double position = sample / GetSampleRate();
+        const double previousPosition = bridge->seconds.load();
+        const double previousHost = bridge->hostSeconds.load();
+        bridge->seconds = position;
         bridge->tempo = tempo; bridge->beat = beat;
         const double renderHostSeconds = (time.mFlags & kAudioTimeStampHostTimeValid) && time.mHostTime != 0
             ? time.mHostTime * ticksToSeconds : now;
@@ -163,11 +171,27 @@ public:
         const bool resumedAfterGap = now - bridge->lastRenderSeconds.load() > 0.5;
         bridge->lastRenderSeconds = now;
         bridge->frames = frames;
-        // A suspended channel may miss Stop and the next Play entirely. Its old
-        // start anchor must not place a new take using that unobserved interval.
-        if (playing && (!bridge->playing.load() || resumedAfterGap)) {
-            bridge->startSeconds = sample / GetSampleRate();
-            bridge->startHostSeconds = bridge->hostSeconds.load();
+        const double currentHost = bridge->hostSeconds.load();
+        const double expectedPosition = previousPosition + currentHost - previousHost;
+        const double tolerance = std::max(0.05, 2.0 * frames / GetSampleRate());
+        const bool positionJumped = std::abs(position - expectedPosition) > tolerance;
+        // Logic may announce Play with a transient timeline position, even when
+        // its render clock is valid. Re-anchor when subsequent positions correct
+        // it, and require 50 ms of coherent reports before creating a take. The
+        // armed movie already captures this interval, so settling doesn't trim
+        // away the valid start. A render gap also begins a new candidate anchor.
+        if (playing) {
+            if (!bridge->playing.load() || resumedAfterGap || positionJumped || anchorStableSince == 0) {
+                bridge->startSeconds = position;
+                bridge->startHostSeconds = currentHost;
+                bridge->startAnchorValid = false;
+                anchorStableSince = now;
+            } else if (now - anchorStableSince >= 0.05) {
+                bridge->startAnchorValid = true;
+            }
+        } else {
+            bridge->startAnchorValid = false;
+            anchorStableSince = 0;
         }
         bridge->playing = playing; bridge->recording = recording;
         bridge->valid = true;

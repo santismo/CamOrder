@@ -192,6 +192,45 @@ struct SessionIntegration {
                 "Clock-regression take retains playable recorded video")
         }
         print("PASS: repeated Play/Record with stale and future first-block clocks saves correctly placed, playable lane clips")
+        for initialPosition in [18.622743764, 158.569773243, 0.0] {
+            let lane = session.store.project.timeline.lanes[0].id
+            let previousCount = session.store.project.timeline.lanes[0].clips.count
+            session.store.armLane(lane)
+            pump(duration: 0.3, position: 4.8, playing: false)
+            pump(duration: 0.035, position: initialPosition, playing: true, recording: true)
+            require(session.store.pendingTake == nil, "An unsettled initial Play position cannot create a take")
+            pump(duration: 1.1, position: 4.8, playing: true, recording: true)
+            require(session.store.pendingTake != nil && abs(session.store.pendingTake!.startSeconds - 4.8) < 0.1,
+                "Take starts at the corrected Logic position")
+            pump(duration: 0.7, position: 5.9, playing: false)
+            let clips = session.store.project.timeline.lanes[0].clips
+            require(clips.count == previousCount + 1, "Corrected startup take survives Stop")
+            let clip = clips.last!
+            require(abs(clip.timelineStartSeconds - 4.8) < 0.1 && abs(clip.durationSeconds - 1.1) < 0.15,
+                "Corrected startup has the right timeline placement and captured duration")
+            require(FileManager.default.fileExists(atPath: folder.appendingPathComponent(clip.videoFile).path),
+                "Corrected take's movie remains in the project")
+        }
+        print("PASS: real encoded takes survive Stop after incorrect initial timeline reports, including the observed 18.62-to-4.8 correction")
+        // Even an independent placement failure must not erase encoded footage.
+        let recoveryLane = session.store.project.timeline.lanes[0].id
+        session.store.armLane(recoveryLane)
+        pump(duration: 0.3, position: 80, playing: false)
+        pump(duration: 0.8, position: 80, playing: true)
+        let recoveryURL = session.store.pendingRecordingURL(laneID: recoveryLane)!
+        session.store.pendingTakes[recoveryLane]?.startSeconds = 200
+        pump(duration: 0.7, position: 80.8, playing: false)
+        require(FileManager.default.fileExists(atPath: recoveryURL.path), "Placement failure must preserve the encoded movie")
+        let recoveredMedia = session.store.project.media.first { session.store.absoluteURL(for: $0.relativePath) == recoveryURL }
+        require(recoveredMedia != nil && (recoveredMedia!.durationSeconds ?? 0) > 0.7,
+            "Recovered footage stays registered in the project and survives session cleanup")
+        require(session.store.lastError?.contains("Video was saved") == true && session.store.pendingTake == nil,
+            "Placement failure gives accurate recovery guidance and clears the take")
+        let reopenedRecovery = try ProjectDocument.open(at: folder)
+        require(reopenedRecovery.project.media.contains { $0.relativePath == recoveredMedia!.relativePath },
+            "Recovered media persists when the project is reopened")
+        session.store.lastError = nil
+        print("PASS: a forced placement failure preserves the real encoded movie, saved project media and recovery guidance")
         session.store.armLane(session.store.project.timeline.lanes[0].id)
         pump(duration: 0.3, position: 32, playing: false)
         pump(duration: 1.2, position: 32, playing: true)

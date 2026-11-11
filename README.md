@@ -14,7 +14,7 @@ Record your cameras or screen, cut to your music, animate your shots, and export
 
 See a [six-lane arrangement and its finished performance](https://santismo.github.io/CamOrder/#full-session), including the saved cuts and framing automation.
 
-**Current release: [0.10.2](https://github.com/santismo/CamOrder/releases/tag/au-v0.10.2).** Fixes armed takes disappearing when Logic starts with a stale render timestamp. Choose Full, Balanced or Light previews. In Balanced or Light, new clips prepare automatically while Main Stage is open, playback is stopped and all lanes are disarmed. Original recordings and final exports keep their quality.
+**Current release: [0.10.3](https://github.com/santismo/CamOrder/releases/tag/au-v0.10.3).** Checks that Logic’s initial playback position has settled before placing a take and preserves recorded footage if placement fails. Choose Full, Balanced or Light previews. In Balanced or Light, new clips prepare automatically while Main Stage is open, playback is stopped and all lanes are disarmed. Original recordings and final exports keep their quality.
 
 ## Start recording in Logic
 
@@ -82,6 +82,6 @@ auval -v aufx CmSt Sntm
 
 To build the DMG and native installer from the verified component, run `python3 Scripts/package-installer.py`. See [installer packaging and verification](docs/INSTALLER.md).
 
-Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.10.2.md) for the tests and their limits.
+Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.10.3.md) for the tests and their limits.
 
 CamOrder is [MIT licensed](LICENSE). The vendored AudioUnitSDK has its [own license](CamOrderStudio/Vendor/AudioUnitSDK/LICENSE.txt).

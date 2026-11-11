@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.10.2 development build
+# CamOrder Studio Audio Unit — 0.10.3 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport without MIDI routing, but depends on Logic continuing to process that channel. For silent sections or video-only editing, read [Transport and silent playback](#transport-and-silent-playback).
 
@@ -234,11 +234,17 @@ AU 0.9.2 keeps its transport scheduling activity while a video project is open, 
 
 The **Motion** label is beside the timeline editing buttons and also appears in the region's right-click menu. **View selected clip** (previously Edit selection) changes only the stopped preview, to expose a selected clip under another layer; it is not a transport mode and does not change the export. It makes no visible difference when that clip is already on top.
 
-See the [0.10.2 verification record](../docs/VERIFICATION-0.10.2.md) (or `VERIFICATION.md` in the ZIP) for this release’s test record and limits. The [0.9.2 record](../docs/VERIFICATION-0.9.2.md) documents the prior playback and lane fixes retained in this build. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. The Logic follow-up confirmed playback while audio passes through Stereo Out, with the silent-section limitation described above. Automated host tests do not establish continuous transport in silent Logic sessions, and the quiet-audio workaround remains unverified.
+See the [0.10.3 verification record](../docs/VERIFICATION-0.10.3.md) (or `VERIFICATION.md` in the ZIP) for this release’s test record and limits. The [0.9.2 record](../docs/VERIFICATION-0.9.2.md) documents the prior playback and lane fixes retained in this build. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. The Logic follow-up confirmed playback while audio passes through Stereo Out, with the silent-section limitation described above. Automated host tests do not establish continuous transport in silent Logic sessions, and the quiet-audio workaround remains unverified.
 
 An old cut made before the 0.2.5 fixes may already contain an incorrect saved source start. The app cannot safely infer its intended content; redo an affected old cut from the original take. Original media remains intact.
 
-## Recording-start fix in 0.10.2
+## Recording-start fix in 0.10.3
+
+Logic can initially report an incorrect timeline position when Play/Record begins, even with a valid host-clock timestamp. CamOrder now waits for 50 ms of consistent reports before placing a take and corrects the starting anchor if the first position was transient. Video pre-roll continues during that check. This addresses the additional failure found after 0.10.2.
+
+If recorded video cannot be placed on a lane, CamOrder keeps the file and shows recovery instructions. Open **Media → Video Folder** to find it, then use **Import Video**. A placement error no longer discards usable recorded footage.
+
+## Render-clock check in 0.10.2
 
 A fresh Play/Record callback can contain a render timestamp left over from before playback. Earlier builds could place an armed take far ahead of the playhead and discard it as an empty region at Stop. The AU now uses the callback’s current host clock when a render timestamp is more than two seconds away; ordinary precise render timestamps are preserved. Lanes still record on Play or Record and save/disarm on Stop.
 
@@ -266,7 +272,7 @@ Preview copies use disk space in `~/Library/Caches/com.santismo.CamOrderStudio/P
 
 Three simultaneous full-quality recordings still require three encoders. These settings reduce preview work; they do not guarantee a particular overall CPU reduction or cure missing Logic transport callbacks. The user reports that enabling Logic's metronome improves playback on their setup; this is recorded as a practical observation, not a general transport fix.
 
-This 0.10.2 release retains the exact 0.10.0 capture helper and its signing identity. The recording-start fix is in the AU transport bridge. The ZIP’s command-line installer backs up the previous component and does not close Logic. A normal source rebuild can re-sign the helper; these local release packages retain the verified helper.
+This 0.10.3 release retains the exact 0.10.0 capture helper and its signing identity. The recording-start fix is in the AU transport bridge. The ZIP’s command-line installer backs up the previous component and does not close Logic. A normal source rebuild can re-sign the helper; these local release packages retain the verified helper.
 
 ## Build and uninstall
 

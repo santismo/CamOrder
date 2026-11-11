@@ -884,6 +884,20 @@ final class ProjectStore: ObservableObject {
         let availableDuration = actualMediaDuration.map { max(0, $0 - pendingTake.trimInSeconds) } ?? requestedDuration
         let visibleDuration = min(requestedDuration, availableDuration)
         guard visibleDuration > 0, FileManager.default.fileExists(atPath: document.absoluteURL(for: pendingTake.relativeVideoFile).path) else {
+            // Placement failure does not mean the encoded movie is empty. Keep
+            // usable footage in the project so the session's pre-roll cleanup
+            // cannot delete it and the user can recover it through Video Folder.
+            if let duration = actualMediaDuration, duration.isFinite, duration > 0,
+               FileManager.default.fileExists(atPath: document.absoluteURL(for: pendingTake.relativeVideoFile).path) {
+                if !document.project.media.contains(where: { $0.relativePath == pendingTake.relativeVideoFile }) {
+                    document.project.media.append(MediaAsset(kind: .video, displayName: "Recovered " + pendingTake.clipId,
+                        relativePath: pendingTake.relativeVideoFile, durationSeconds: duration, frameRate: timecode.frameRate))
+                    self.document = document
+                }
+                saveProject()
+                cancelPendingTake(message: "Video was saved, but its timeline position could not be determined. Open Media → Video Folder to recover it with Import Video.", laneID: pendingTake.laneId)
+                return
+            }
             cancelPendingTake(message: "No usable video was recorded. Check the input and try again.", laneID: pendingTake.laneId)
             return
         }

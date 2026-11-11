@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.10.3").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.11.0").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -2888,21 +2888,24 @@ struct CapturePreviewPane: View {
     @ObservedObject var cameraEngine: CameraCaptureEngine
     var body: some View {
         if cameraEngine.usesCaptureHelper || cameraEngine.selectedDeviceID == "window:picker" {
-            LivePreviewImage(frames: cameraEngine.previewFrames)
+            LivePreviewImage(frames: cameraEngine.previewFrames, crop: cameraEngine.inputCrop)
         } else { CameraPreviewView(session: cameraEngine.previewSession) }
     }
 }
 
 struct LivePreviewImage: NSViewRepresentable {
     let frames: CapturePreviewFrames
-    func makeNSView(context: Context) -> LivePreviewLayerView { LivePreviewLayerView(frames: frames) }
-    func updateNSView(_ view: LivePreviewLayerView, context: Context) { view.bind(to: frames) }
+    var crop: InputCrop? = nil
+    func makeNSView(context: Context) -> LivePreviewLayerView { LivePreviewLayerView(frames: frames, crop: crop) }
+    func updateNSView(_ view: LivePreviewLayerView, context: Context) { view.bind(to: frames); view.setCrop(crop) }
 }
 
 final class LivePreviewLayerView: NSView {
     private var subscription: AnyCancellable?
     private weak var source: CapturePreviewFrames?
-    init(frames: CapturePreviewFrames) {
+    private var crop: InputCrop?
+    init(frames: CapturePreviewFrames, crop: InputCrop? = nil) {
+        self.crop = crop
         super.init(frame: .zero)
         wantsLayer = true
         layer = CALayer()
@@ -2917,7 +2920,16 @@ final class LivePreviewLayerView: NSView {
         source = frames
         // SwiftUI reuses this view when the single input changes. Subscribe to the
         // new engine, including its current image, instead of retaining the old one.
-        subscription = frames.$image.sink { [weak self] image in self?.layer?.contents = image }
+        subscription = frames.$image.sink { [weak self] image in self?.display(image) }
+    }
+    func setCrop(_ crop: InputCrop?) {
+        guard self.crop != crop else { return }
+        self.crop = crop; display(source?.image)
+    }
+    private func display(_ image: CGImage?) {
+        if let image, let rect = crop?.rect {
+            layer?.contents = image.cropping(to: CGRect(x: rect.minX * Double(image.width), y: rect.minY * Double(image.height), width: rect.width * Double(image.width), height: rect.height * Double(image.height)))
+        } else { layer?.contents = image }
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }

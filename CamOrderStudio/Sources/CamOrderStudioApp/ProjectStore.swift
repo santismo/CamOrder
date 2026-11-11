@@ -464,6 +464,30 @@ final class ProjectStore: ObservableObject {
         captureInputs?.reconcile()
     }
 
+    @discardableResult
+    func setInputCrop(_ crop: InputCrop?, sourceID: String) -> Bool {
+        guard var document, !sourceID.isEmpty else { return false }
+        let busy = captureInputs?.inputIsBusy(sourceID) ?? document.project.timeline.lanes.contains {
+            ($0.captureSourceID ?? document.project.defaultCaptureSourceID) == sourceID && ($0.isArmed || laneIsBusy($0.id))
+        }
+        guard !busy else {
+            lastError = "Disarm all lanes using this input and wait for recording to finish before applying its crop."
+            return false
+        }
+        guard crop == nil || crop?.normalized != nil else { return false }
+        let normalized = crop?.normalized
+        let effective = normalized == .full ? nil : normalized
+        guard document.project.inputCrops?[sourceID] != effective else { return true }
+        registerUndo(project: document.project)
+        var crops = document.project.inputCrops ?? [:]
+        crops[sourceID] = effective
+        document.project.inputCrops = crops.isEmpty ? nil : crops
+        self.document = document
+        saveProject()
+        captureInputs?.reconcile()
+        return true
+    }
+
     func setLaneCaptureCrop(_ id: String, rect: CGRect?) {
         guard var document, let index = document.project.timeline.lanes.firstIndex(where: { $0.id == id }), !laneIsBusy(id) else { return }
         document.project.timeline.lanes[index].captureCrop = rect.map { [$0.minX, $0.minY, $0.width, $0.height] }
@@ -1351,6 +1375,7 @@ final class ProjectStore: ObservableObject {
         reconcileSelection()
         updateUndoRedoState()
         saveProject()
+        captureInputs?.reconcile()
     }
 
     func redoProjectChange() {
@@ -1362,10 +1387,23 @@ final class ProjectStore: ObservableObject {
         reconcileSelection()
         updateUndoRedoState()
         saveProject()
+        captureInputs?.reconcile()
     }
 
     private func restoringHistory(_ snapshot: CamOrderProject, preservingRuntimeFrom current: CamOrderProject) -> CamOrderProject {
         var restored = snapshot
+        // An undo may change idle inputs, but never the geometry of an armed
+        // pre-roll or a writer still finalizing its movie.
+        let sourceIDs = Set((current.inputCrops ?? [:]).keys).union((snapshot.inputCrops ?? [:]).keys)
+        for id in sourceIDs {
+            let busy = captureInputs?.inputIsBusy(id) ?? current.timeline.lanes.contains {
+                ($0.captureSourceID ?? current.defaultCaptureSourceID) == id && ($0.isArmed || laneIsBusy($0.id))
+            }
+            if busy {
+                if restored.inputCrops == nil { restored.inputCrops = [:] }
+                restored.inputCrops?[id] = current.inputCrops?[id]
+            }
+        }
         // Arm state and capture connections are live controls, never undoable edits.
         for index in restored.timeline.lanes.indices {
             let id = restored.timeline.lanes[index].id

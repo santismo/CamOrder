@@ -12,6 +12,7 @@ public struct CamOrderProject: Codable, Equatable, Sendable {
     public var captureLatencyProfiles: [CaptureLatencyProfile]
     public var exportSettings: ExportSettings
     public var defaultCaptureSourceID: String?
+    public var inputCrops: [String: InputCrop]?
 
     public init(
         projectVersion: Int = 1,

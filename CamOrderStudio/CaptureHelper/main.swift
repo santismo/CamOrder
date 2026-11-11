@@ -53,6 +53,7 @@ final class CaptureHelperDelegate: NSObject, NSApplicationDelegate {
         case "preview": engine.startPreview()
         case "chooseWindow": engine.chooseWindow()
         case "stopPreview": engine.stopPreview()
+        case "inputCrop": engine.setInputCrop(command.inputCrop)
         case "crop":
             if let rect = command.crop, rect.count == 4 { engine.setScreenCropRect(CGRect(x: rect[0], y: rect[1], width: rect[2], height: rect[3])) }
             else { engine.setScreenCropRect(nil) }

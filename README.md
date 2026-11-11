@@ -14,7 +14,7 @@ Record your cameras or screen, cut to your music, animate your shots, and export
 
 See a [six-lane arrangement and its finished performance](https://santismo.github.io/CamOrder/#full-session), including the saved cuts and framing automation.
 
-**Current release: [0.10.3](https://github.com/santismo/CamOrder/releases/tag/au-v0.10.3).** Checks that Logic’s initial playback position has settled before placing a take and preserves recorded footage if placement fails. Choose Full, Balanced or Light previews. In Balanced or Light, new clips prepare automatically while Main Stage is open, playback is stopped and all lanes are disarmed. Original recordings and final exports keep their quality.
+**Current release: [0.11.0](https://github.com/santismo/CamOrder/releases/tag/au-v0.11.0).** Crop each camera or screen input from **Live Inputs → … → Crop input…**. The crop is saved per input and baked into new recordings, so borders stay removed when clips are resized on Main Stage or exported. Includes the verified recording-start/recovery fixes, Full/Balanced/Light previews, and automatic playback preparation while stopped and disarmed.
 
 ## Start recording in Logic
 
@@ -42,6 +42,7 @@ Webcams, macOS-exposed iPhone/Continuity Camera inputs, main-display screen or r
 
 ## Edit and export
 
+- **Input crops:** disarm the input’s lanes, open its **… → Crop input…** window, and drag the edges/corners or use border sliders. Apply saves the crop; Reset followed by Apply restores full frame. Existing clips stay unchanged. See [input crops](CamOrderStudio/README-AU.md#input-crops-in-0110).
 - **Lighter previews:** Balanced is the default; Light reduces live-preview size further. Playback copies prepare automatically after one idle second, suspend when playback/recording begins, and reuse completed files. **Prepare now** and **Pause previews** remain available. See [preview quality](CamOrderStudio/README-AU.md#preview-quality).
 - **Automatic motion:** select one or several regions and use **Motion** to create zoom/pan animation while preserving source timing and trims.
 - A dark, freely resizable editor with adjustable Main Stage, Live Inputs and timeline panels. Inspector, Media and Sync controls open when needed.
@@ -82,6 +83,6 @@ auval -v aufx CmSt Sntm
 
 To build the DMG and native installer from the verified component, run `python3 Scripts/package-installer.py`. See [installer packaging and verification](docs/INSTALLER.md).
 
-Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.10.3.md) for the tests and their limits.
+Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.11.0.md) for the tests and their limits.
 
 CamOrder is [MIT licensed](LICENSE). The vendored AudioUnitSDK has its [own license](CamOrderStudio/Vendor/AudioUnitSDK/LICENSE.txt).

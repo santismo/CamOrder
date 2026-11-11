@@ -25,7 +25,7 @@ Arm any combination of lanes. Their different cameras follow the same Logic Play
 
 A lane armed during playback starts at the current position. Disarming one shared-camera lane fixes that region’s end while the other lanes keep recording. Its region shows **finishing** until the shared movie is finalized; stop the other lanes sharing that input before rearming that particular lane. Camera selection and capture-region changes are locked while affected lanes are armed or finishing.
 
-Use a preview tile’s **…** menu to restart/stop its preview. Screen region has visible **Show region**, **Apply** and **Hide** buttons. Window has **Choose window…**. Multiple previews wrap into a scrollable grid. Hiding Live Inputs affects the layout; it does not stop armed capture.
+Use a preview tile’s **…** menu to open **Crop input…** or restart/stop its preview. [Input crops](#input-crops-in-0110) remove borders from new recordings; disarm that input’s lanes before editing its crop. Screen region has visible **Show region**, **Apply** and **Hide** buttons. Window has **Choose window…**. Multiple previews wrap into a scrollable grid. Hiding Live Inputs affects the layout; it does not stop armed capture.
 
 There is no fixed three-input cap. Four simultaneous synthetic inputs and four independent helper processes were verified. The number of physical cameras and sustainable frame rate depend on macOS, camera availability, USB bandwidth and encoding load; this build has not been tested with four physical cameras on this Mac.
 

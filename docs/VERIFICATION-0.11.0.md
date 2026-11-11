@@ -1,6 +1,6 @@
 # CamOrder Studio AU 0.11.0 — per-input recording crops
 
-Date: November 11, 2026. Local test candidate; physical iPhone/iPad follow-up pending.
+Date: November 11, 2026. Physical camera follow-up confirmed.
 
 ## Behavior
 
@@ -26,11 +26,11 @@ The cropper reuses a bounded BGRA pixel pool and copies only selected rows. An u
 AU SHA-256: `d3da1b56cfe49eb26995ed7e57b24b91af166f9d721600bc2b2ca69550880a2f`.
 Helper SHA-256: `d8f98c0b6bbebe39592ae7c494ec6cc841e011dbd425534fe0b5da0df39065f9`.
 
-## Scope and follow-up
+## Scope and limits
 
 The 0.10.3 recording-start and footage-recovery fixes are retained. Both the AU and capture helper are now version 0.11.0; this feature requires the new helper. macOS may request capture permission again for CamOrder Capture after reopening the host. Existing Logic projects and media are not changed by installation; the installer backs up the previous component and does not quit Logic.
 
-Physical follow-up: reopen Logic with AU 0.11.0, crop the iPhone/iPad USB screen feed while its lanes are disarmed, record a short take in Light mode, then shrink the clip on Main Stage and confirm the removed borders stay absent. Keep the device orientation fixed while recording. The public 0.10.3 remains the confirmed release until this follow-up.
+**Physical setup confirmed:** the user completed the requested AU 0.11.0 follow-up and reported that crop and recording work: the cropped USB screen-camera take plays correctly, and removed borders remain absent when the clip is shrunk on Main Stage. This confirms their setup; it is not a claim about every iPhone/iPad combination. Keep device orientation fixed while recording.
 
 Rectangular crops only. Cropping does not turn a USB screen feed into a direct camera connection, restore pixels from older recordings, or fix missing Logic transport callbacks during silence. Intel/macOS 13+ development build, locally signed, without a validated Apple silicon binary.
 

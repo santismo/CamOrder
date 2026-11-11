@@ -8,7 +8,7 @@ CamOrder's current focus is **CamOrder Studio AU 0.10.1**, used as one Audio FX 
 
 ## Studio Audio Unit development builds
 
-The [historical AU archive](https://github.com/santismo/CamOrder/releases/tag/legacy-au-archive) preserves the Intel macOS 13+ component, matching source, installer and original guide for each build. These are locally signed, unnotarized builds. Each installer targets the same **CamOrder Studio.component**, so installing an old version replaces the current one after making a backup. Quit Logic first.
+The [historical AU archive](https://github.com/santismo/CamOrder/releases/tag/legacy-au-archive) preserves the Intel macOS 13+ component, matching source, installer and original guide for each build. These are locally signed, unnotarized builds. Each installer targets the same **CamOrder Studio.component**, so installing an old version replaces the current one. The ZIP’s command-line installer makes a backup; keep a copy of the current component before using a PKG to downgrade. Quit Logic first.
 
 | Version | Development stage | Download |
 | --- | --- | --- |

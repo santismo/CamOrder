@@ -262,7 +262,7 @@ Preview copies use disk space in `~/Library/Caches/com.santismo.CamOrderStudio/P
 
 Three simultaneous full-quality recordings still require three encoders. These settings reduce preview work; they do not guarantee a particular overall CPU reduction or cure missing Logic transport callbacks. The user reports that enabling Logic's metronome improves playback on their setup; this is recorded as a practical observation, not a general transport fix.
 
-This 0.10.1 local release retains the exact 0.10.0 capture helper and its signing identity. The automation change is in the AU editor. Installation backs up the previous component and does not close Logic. A normal source rebuild can re-sign the helper; these local release packages retain the verified helper.
+This 0.10.1 local release retains the exact 0.10.0 capture helper and its signing identity. The automation change is in the AU editor. The ZIP’s command-line installer backs up the previous component and does not close Logic. A normal source rebuild can re-sign the helper; these local release packages retain the verified helper.
 
 ## Build and uninstall
 

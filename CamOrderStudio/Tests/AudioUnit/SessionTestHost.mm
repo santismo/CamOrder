@@ -7,6 +7,7 @@ struct TestHost {
     AudioUnit unit = nullptr;
     COBridge *bridge = nullptr;
     double seconds = 0, renderSample = 0, tempo = 120, beatZeroSeconds = 0;
+    double nextPlayClockOffset = 0;
     bool musicalTimeAvailable = true;
     bool playing = false, recording = false, inputReady = false;
 };
@@ -58,11 +59,20 @@ void *COTestHostCreate() {
     return host;
 }
 COBridge *COTestHostBridge(void *value) { return ((TestHost *)value)->bridge; }
+void COTestHostSetNextPlayClockOffset(void *value, double seconds) {
+    ((TestHost *)value)->nextPlayClockOffset = seconds;
+}
 int32_t COTestHostRender(void *value, double seconds, bool playing, bool recording) {
     auto &host = *(TestHost *)value;
     host.seconds = seconds; host.playing = playing; host.recording = recording; host.inputReady = false;
     AudioTimeStamp timestamp = {}; timestamp.mSampleTime = host.renderSample; host.renderSample += 512;
     timestamp.mHostTime = mach_absolute_time(); timestamp.mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid;
+    if (playing && host.nextPlayClockOffset != 0) {
+        mach_timebase_info_data_t info; mach_timebase_info(&info);
+        const double tickSeconds = double(info.numer) / double(info.denom) / 1e9;
+        timestamp.mHostTime = uint64_t(timestamp.mHostTime + host.nextPlayClockOffset / tickSeconds);
+        host.nextPlayClockOffset = 0;
+    }
     struct { UInt32 count; AudioBuffer buffers[2]; } buffers = {2, {{1, 0, nullptr}, {1, 0, nullptr}}};
     AudioUnitRenderActionFlags flags = 0;
     return AudioUnitRender(host.unit, &flags, &timestamp, 0, 512, (AudioBufferList *)&buffers);

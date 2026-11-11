@@ -128,6 +128,34 @@ int main(int argc, char **argv) {
         failedTime.mSampleTime += 64;
         check(AudioUnitProcess(unit, &failedFlags, &failedTime, 64, (AudioBufferList *)&silentBuffers), "processing resumes after an unobserved transport interval");
         require(readTransport(bridge, &snapshot) && snapshot.startSeconds == 20, "resuming callbacks replaces the stale take-start anchor");
+        // Logic can report a fresh Play position alongside an old render host
+        // timestamp on the first block. Keep that timestamp out of the take anchor.
+        mach_timebase_info_data_t clockInfo; mach_timebase_info(&clockInfo);
+        const double tickSeconds = double(clockInfo.numer) / double(clockInfo.denom) / 1e9;
+        for (double offset : {-217.0, -34.0, 34.0, -0.02}) {
+            host.playing = false;
+            failedTime.mSampleTime += 64;
+            failedTime.mHostTime = mach_absolute_time();
+            failedTime.mFlags |= kAudioTimeStampHostTimeValid;
+            check(AudioUnitProcess(unit, &failedFlags, &failedTime, 64, (AudioBufferList *)&silentBuffers), "stop before clock regression");
+            host.playing = true; host.sample = 240000;
+            failedTime.mSampleTime += 64;
+            const double currentHost = mach_absolute_time() * tickSeconds;
+            failedTime.mHostTime = uint64_t((currentHost + offset) / tickSeconds);
+            check(AudioUnitProcess(unit, &failedFlags, &failedTime, 64, (AudioBufferList *)&silentBuffers), "play with offset render timestamp");
+            require(readTransport(bridge, &snapshot) && snapshot.startSeconds == 2.5, "fresh Play position retained");
+            const double expectedHost = fabs(offset) > 2 ? currentHost : failedTime.mHostTime * tickSeconds;
+            require(fabs(snapshot.startHostSeconds - expectedHost) < 0.01,
+                "stale or future render clock must not move an armed take away from the playhead");
+            if (fabs(offset) <= 2) require(snapshot.hostSeconds == failedTime.mHostTime * tickSeconds,
+                "normal render timing retains the precise host timestamp");
+            failedTime.mSampleTime += 64; host.sample += 64;
+            failedTime.mHostTime = mach_absolute_time();
+            check(AudioUnitProcess(unit, &failedFlags, &failedTime, 64, (AudioBufferList *)&silentBuffers), "next block has current host time");
+            require(readTransport(bridge, &snapshot) && fabs(snapshot.startHostSeconds - expectedHost) < 0.01,
+                "take anchor remains correct after the first block");
+        }
+        puts("PASS: stale/future startup render clocks fall back to the current host clock; precise valid timestamps are retained");
         check(AudioUnitUninitialize(unit), "uninitialize callback test");
         puts("PASS: transport after input; v1/v2 fallback; callback failures preserve state; silent audio stays zero; AudioUnitProcess follows transport");
         CFPropertyListRef state = nullptr; UInt32 size = sizeof(state);

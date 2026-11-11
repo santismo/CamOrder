@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.10.1").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.10.2").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")

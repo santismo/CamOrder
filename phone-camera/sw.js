@@ -1,4 +1,4 @@
-const CACHE = 'camorder-camera-v1';
+const CACHE = 'camorder-camera-v1.0.1';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './camera.mjs', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 self.addEventListener('install', event => {
   // Do not skipWaiting: an update must never interrupt an active camera session.

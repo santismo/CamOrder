@@ -157,7 +157,7 @@ A single measurement estimates a constant offset. If the mismatch changes at dif
 
 - Built-in cameras and USB webcams exposed by macOS.
 - iPhone Continuity Camera over USB or wireless. Enable Continuity Camera, use a trusted connection, and refresh the input list after connecting.
-- Wired iPhone/iPad screen capture when macOS exposes the device as a capture input. Connecting a cable alone does not provide an iPhone camera feed; Continuity Camera supplies that.
+- Wired iPhone/iPad screen capture when macOS exposes the device as a capture input. For this setup, leave the phone/tablet **disabled as an audio device in Audio MIDI Setup** on the Mac: click **Disable** if enabled; seeing **Enable** means it is already disabled. Refresh Live Inputs afterward. See the [USB screen-camera setup](../docs/PHONE_CAMERA.md#set-up-once). Connecting a cable alone does not provide an iPhone camera feed; Continuity Camera supplies that.
 - **Main display** records the main screen. **Screen region (main display)** captures a rectangle: click **Show region**, move/resize the frame on the main display, then **Apply**. **Hide** removes the outline without stopping capture. Whole secondary-display capture is not included.
 - **Window (choose…)**, on **macOS 14+**, captures one individual window using ScreenCaptureKit. Click **Choose window…**, select the desired window in the macOS picker, and confirm sharing. Wait for its Live Inputs image, then arm and record normally. Window audio is not captured. Multiple lanes can share this window input; this release supports one selected window per CamOrder instance alongside other camera/screen inputs.
 

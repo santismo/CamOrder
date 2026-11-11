@@ -38,7 +38,7 @@ Every lane starts with the shared **Default** input. Assign another source to a 
 
 Webcams, macOS-exposed iPhone/Continuity Camera inputs, main-display screen or region capture, and individual-window capture are supported. For a window, select **Window (choose…) → Choose window…** and use the macOS picker (macOS 14+). Four simultaneous synthetic inputs were verified; physical capacity depends on the devices, USB bandwidth and Mac.
 
-**iPad/iPhone camera over USB without an iOS developer account:** [CamOrder Camera](https://santismo.github.io/CamOrder/phone-camera/) is a free Home Screen web app that shows a clean local camera preview. CamOrder can capture the device’s screen over USB using its existing wired-device input. This is screen capture, not a direct webcam feed; the device must remain unlocked with the web app open. See [setup and verification limits](docs/PHONE_CAMERA.md).
+**iPad/iPhone camera over USB without an iOS developer account:** [CamOrder Camera](https://santismo.github.io/CamOrder/phone-camera/) is a free Home Screen web app that shows a clean local camera preview. CamOrder can capture the device’s screen over USB using its existing wired-device input. For this setup, leave each phone/tablet **disabled as an audio device in the Mac’s Audio MIDI Setup**, then refresh Live Inputs. This is screen capture, not a direct webcam feed; the device must remain unlocked with the web app open. See [setup and verification limits](docs/PHONE_CAMERA.md).
 
 ## Edit and export
 

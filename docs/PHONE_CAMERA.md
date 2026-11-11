@@ -10,14 +10,15 @@ CamOrder Camera is a static, free Home Screen web app. It displays a camera prev
 2. Open **CamOrder Camera** using its Home Screen icon. Tap **Start camera** and allow camera access. It does not request microphone access.
 3. Select front/back camera, rotate the device to landscape, and choose **Clean view**. Tap anywhere to show controls again. **Fit** preserves the entire camera picture with black bars as needed; **Fill** crops it to fill the device screen. **Mirror** changes the picture the Mac captures too.
 4. Connect a **data-capable USB cable** to the Mac. Unlock the device and choose **Trust** if prompted. iPhone 14 uses Lightning; the M1 iPad uses USB-C.
-5. In CamOrder Studio’s **Live Inputs**, refresh the list and select the iPad/iPhone screen input. The iPhone’s **Continuity Camera** may also appear as a separate device. Select the input showing the web app’s preview.
-6. Confirm the live picture, assign that source to a video lane, arm the lane, then record with Logic. **Main Stage** shows recorded regions, while **Live Inputs** shows incoming video.
+5. On the Mac, open **Audio MIDI Setup** in **Applications → Utilities**, then choose **Window → Show Audio Devices**. Leave each iPhone/iPad used for USB screen capture **disabled as an audio device**. Click **Disable** if enabled; if the button says **Enable**, it is already disabled. Use your usual audio interface for Logic.
+6. In CamOrder Studio’s **Live Inputs**, refresh the list and select the iPad/iPhone screen input. The iPhone’s **Continuity Camera** may also appear as a separate device. Select the input showing the web app’s preview.
+7. Confirm the live picture, assign that source to a video lane, arm the lane, then record with Logic. **Main Stage** shows recorded regions, while **Live Inputs** shows incoming video.
 
 The installed CamOrder Studio 0.9.2 capture helper already includes wired iOS screen discovery; no new phone app binary or Mac virtual-camera extension is required for this workflow. Older builds may differ.
 
 ## If the device appears but no picture arrives
 
-Keep the device unlocked with the web app visible and its camera running. Close other apps using the same input. Reconnect the USB cable, then refresh inputs.
+Keep the device unlocked with the web app visible and its camera running. Check that the device’s USB audio is disabled in **Audio MIDI Setup**, as described above. Close other apps using the same input. Reconnect the USB cable, then refresh inputs.
 
 To check the underlying USB screen connection independently, open **QuickTime Player → File → New Movie Recording** on the Mac and select the connected device from the menu beside Record. This should display its screen. You do not need to start a QuickTime recording. Close that preview before trying the direct CamOrder input again.
 

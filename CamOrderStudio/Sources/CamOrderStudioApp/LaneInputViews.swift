@@ -85,6 +85,8 @@ private struct SourcePreviewCard: View {
                 }
                 Spacer(minLength: 2)
                 Menu {
+                    Button("Crop input…") { inputs.showCropEditor(for: sourceID) }.disabled(busy)
+                    Divider()
                     Button("Start / restart preview") { inputs.engines[sourceID]?.startPreview() }.disabled(busy)
                     Button("Stop preview") { inputs.engines[sourceID]?.stopPreview() }.disabled(busy)
                     if sourceID == "screen:region" {
@@ -136,6 +138,7 @@ private struct ActiveSourcePreview: View {
                 HStack(spacing: 5) {
                     Circle().fill(recording ? .red : (engine.isPreviewing ? .green : .secondary)).frame(width: 6, height: 6)
                     Text(recording ? "Recording" : (engine.isFinishingRecording ? "Saving…" : (buffering ? "Armed" : (engine.isPreviewing ? "Live" : "Preview idle")))).font(.system(size: 10))
+                    if engine.inputCrop != nil { Text("· Cropped").font(.system(size: 10)) }
                 }
             }.padding(6).background(.black.opacity(0.65)).padding(5)
         }

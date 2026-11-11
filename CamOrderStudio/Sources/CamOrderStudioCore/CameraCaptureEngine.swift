@@ -18,6 +18,7 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
     @Published public private(set) var lastRecordingDuration: Double = 0
     public let previewSession: AVCaptureSession
     public private(set) var screenCropRect: CGRect?
+    @Published public private(set) var inputCrop: InputCrop?
     public let previewFrames = CapturePreviewFrames()
     public private(set) var previewQuality: PreviewQuality = .balanced
     private var previewWanted = false
@@ -141,6 +142,17 @@ public final class CameraCaptureEngine: NSObject, ObservableObject {
         startPreview()
     }
     public func selectedDeviceInfo() -> CameraDeviceInfo? { availableDevices.first { $0.id == selectedDeviceID } }
+    public func setInputCrop(_ crop: InputCrop?) {
+        guard !isRecording, !isFinishingRecording else { return }
+        let normalized = crop?.normalized
+        inputCrop = normalized == .full ? nil : normalized
+        if let remote {
+            remote.send(CaptureCommand("inputCrop", inputCrop: inputCrop))
+        } else {
+            let crop = inputCrop
+            worker.queue.async { [worker] in worker.setInputCrop(crop) }
+        }
+    }
     public func setScreenCropRect(_ rect: CGRect?) {
         guard !isRecording, !isFinishingRecording else { return }
         if screenCropRect != rect { previewConfigurationRevision &+= 1 }
@@ -317,6 +329,13 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     private var windowSample: CMSampleBuffer?
     private var windowTimer: DispatchSourceTimer?
     var previewPublisher: PreviewPublisher?
+    private var inputCrop: InputCrop?
+    private var recordingSize: CGSize?
+    private let cropper = RecordingCropper()
+    func setInputCrop(_ crop: InputCrop?) {
+        guard destination == nil else { return }
+        inputCrop = crop?.normalized == .full ? nil : crop?.normalized
+    }
 
     func configure(id: String, crop: CGRect?) throws {
         session.stopRunning()
@@ -349,7 +368,7 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
     }
     func begin(url: URL) {
         destination = url
-        firstTime = nil; lastTime = nil; droppedFrames = 0
+        firstTime = nil; lastTime = nil; droppedFrames = 0; recordingSize = nil
         if windowToken != nil {
             // ScreenCaptureKit sends idle notifications for static windows. Repeat
             // the latest complete frame on the host clock only while recording.
@@ -400,11 +419,23 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         appendVideoSample(timed, synchronizationClock: nil)
     }
     private func appendVideoSample(_ sample: CMSampleBuffer, synchronizationClock: CMClock?) {
-        guard let pixel = CMSampleBufferGetImageBuffer(sample) else { return }
         guard let url = destination else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sample)
         guard time.isValid, time.isNumeric else { return }
         do {
+            // Preview keeps the full feed so the editor can restore cropped edges.
+            // Only recording pixels are cropped; timing remains the source timing.
+            if let input, !input.isReadyForMoreMediaData { droppedFrames += 1; return }
+            var sample = sample
+            if let inputCrop {
+                guard let cropped = try cropper.crop(sample, to: inputCrop) else { droppedFrames += 1; return }
+                sample = cropped
+            }
+            guard let pixel = CMSampleBufferGetImageBuffer(sample) else { return }
+            let size = CGSize(width: CVPixelBufferGetWidth(pixel), height: CVPixelBufferGetHeight(pixel))
+            if inputCrop != nil, let recordingSize, recordingSize != size {
+                throw CaptureFailure("The input dimensions changed during a cropped take. Keep the device orientation fixed, then record a new take.")
+            }
             if writer == nil {
                 let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
                 let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -417,7 +448,7 @@ final class CaptureWriter: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
                 writer.add(input)
                 guard writer.startWriting() else { throw writer.error ?? CaptureFailure("Cannot start recording.") }
                 writer.startSession(atSourceTime: time)
-                self.writer = writer; self.input = input
+                self.writer = writer; self.input = input; recordingSize = size
             }
             guard let writer, let input else { return }
             guard input.isReadyForMoreMediaData else { droppedFrames += 1; return }

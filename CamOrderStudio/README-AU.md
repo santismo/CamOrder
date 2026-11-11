@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.10.3 development build
+# CamOrder Studio Audio Unit — 0.11.0 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport without MIDI routing, but depends on Logic continuing to process that channel. For silent sections or video-only editing, read [Transport and silent playback](#transport-and-silent-playback).
 
@@ -234,9 +234,17 @@ AU 0.9.2 keeps its transport scheduling activity while a video project is open, 
 
 The **Motion** label is beside the timeline editing buttons and also appears in the region's right-click menu. **View selected clip** (previously Edit selection) changes only the stopped preview, to expose a selected clip under another layer; it is not a transport mode and does not change the export. It makes no visible difference when that clip is already on top.
 
-See the [0.10.3 verification record](../docs/VERIFICATION-0.10.3.md) (or `VERIFICATION.md` in the ZIP) for this release’s test record and limits. The [0.9.2 record](../docs/VERIFICATION-0.9.2.md) documents the prior playback and lane fixes retained in this build. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. The Logic follow-up confirmed playback while audio passes through Stereo Out, with the silent-section limitation described above. Automated host tests do not establish continuous transport in silent Logic sessions, and the quiet-audio workaround remains unverified.
+See the [0.11.0 verification record](../docs/VERIFICATION-0.11.0.md) (or `VERIFICATION.md` in the ZIP) for this build’s test record and limits. The [0.10.3 record](../docs/VERIFICATION-0.10.3.md) documents the confirmed USB-screen recording fix retained here. The [0.9.2 record](../docs/VERIFICATION-0.9.2.md) documents the prior playback and lane fixes retained in this build. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. The Logic follow-up confirmed playback while audio passes through Stereo Out, with the silent-section limitation described above. Automated host tests do not establish continuous transport in silent Logic sessions, and the quiet-audio workaround remains unverified.
 
 An old cut made before the 0.2.5 fixes may already contain an incorrect saved source start. The app cannot safely infer its intended content; redo an affected old cut from the original take. Original media remains intact.
+
+## Input crops in 0.11.0
+
+In **Live Inputs**, open a camera’s **…** menu and choose **Crop input…**. A larger, resizable window shows the full feed. Drag any edge or corner to remove borders, or drag inside the rectangle to move it. The Left, Top, Right, and Bottom sliders provide finer adjustment. Choose **Apply crop** to save, **Cancel** to leave the input unchanged, or **Reset to full frame** followed by Apply to remove a crop.
+
+Each physical input has one crop saved in the current project. Lanes sharing that input share its crop. Disarm those lanes and wait for their recording to finish before changing it; other idle cameras can still be adjusted. Crops also apply to Mac screen and window inputs, separately from the existing screen-region selector.
+
+The selected rectangle is written into **new recording files** at the remaining source resolution. Removed borders cannot return when you shrink, move, zoom, or rotate that clip on Main Stage, prepare a playback preview, or export a movie. Existing clips are unchanged. Cropping is rectangular, with no fixed aspect ratio, and encoder dimensions round inward to even pixels. Keep the device orientation fixed during a take; if the input dimensions change during a cropped recording, CamOrder finalizes the usable footage and reports the change.
 
 ## Recording-start fix in 0.10.3
 
@@ -258,7 +266,7 @@ The **Preview** menu under Main Stage controls display quality in the AU. **Bala
 | Balanced | 640 × 480 | 1280 × 720 H.264 preview copy |
 | Light | 320 × 240 | 640 × 480 H.264 preview copy |
 
-Aspect ratio is preserved, so 16:9 live frames are 960 × 540, 640 × 360, and 320 × 180 respectively. The existing live preview cadence (about 30 fps for a 30 fps source) is retained. Changing modes updates all camera helpers without restarting a capture session. The recording encoder still receives the original full-size samples.
+Aspect ratio is preserved, so 16:9 live frames are 960 × 540, 640 × 360, and 320 × 180 respectively. The existing live preview cadence (about 30 fps for a 30 fps source) is retained. Changing modes updates all camera helpers without restarting a capture session. Preview quality does not downscale the recording. An optional input crop removes only the selected borders at the source resolution.
 
 For lighter **recorded playback**, choose Balanced or Light. New and unprepared video files prepare **automatically after one idle second**, while Main Stage is visible, playback is stopped, every video lane is disarmed, and no take or movie export is active. Files are processed one at a time. Ready copies are reused; small originals need no conversion. Full uses original files and never starts preparation.
 
@@ -272,7 +280,7 @@ Preview copies use disk space in `~/Library/Caches/com.santismo.CamOrderStudio/P
 
 Three simultaneous full-quality recordings still require three encoders. These settings reduce preview work; they do not guarantee a particular overall CPU reduction or cure missing Logic transport callbacks. The user reports that enabling Logic's metronome improves playback on their setup; this is recorded as a practical observation, not a general transport fix.
 
-This 0.10.3 release retains the exact 0.10.0 capture helper and its signing identity. The recording-start fix is in the AU transport bridge. The ZIP’s command-line installer backs up the previous component and does not close Logic. A normal source rebuild can re-sign the helper; these local release packages retain the verified helper.
+Version 0.11.0 includes an updated capture helper for input cropping. macOS may ask for Camera or Screen Recording access again for CamOrder Capture; allow the requested access when using that input. The installer backs up the previous component and does not close Logic. The 0.10.3 recording-start and recovery fixes remain in place.
 
 ## Build and uninstall
 

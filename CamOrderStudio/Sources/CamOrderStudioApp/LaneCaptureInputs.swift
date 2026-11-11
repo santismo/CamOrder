@@ -14,6 +14,8 @@ final class LaneCaptureInputs: ObservableObject {
     @Published private(set) var sourceIDs: [String] = []
     private var crops: [String: [Double]] = [:]
     private var regions: [String: CaptureRegionController] = [:]
+    private var cropEditors: [String: InputCropWindowController] = [:]
+    private var editorProjectURL: URL?
     private var qualityObservation: AnyCancellable?
 
     init(store: ProjectStore, discovery: CameraCaptureEngine, createsEngines: Bool = true, defaultOverride: String? = nil) {
@@ -39,6 +41,10 @@ final class LaneCaptureInputs: ObservableObject {
         lanes(for: id).compactMap(\.captureSourceName).first ?? id
     }
     func reconcile() {
+        if editorProjectURL != store.document?.folderURL {
+            cropEditors.values.forEach { $0.close() }; cropEditors.removeAll()
+            editorProjectURL = store.document?.folderURL
+        }
         // Resolve the initial default once and persist it. Device-list reordering
         // or a disconnected camera must never silently switch a recording input.
         if store.hasOpenProject, store.project.defaultCaptureSourceID == nil, let id = defaultSourceID {
@@ -55,6 +61,7 @@ final class LaneCaptureInputs: ObservableObject {
             guard let engine = engines[id], !engine.isRecording, !engine.isFinishingRecording else { continue }
             engine.stopPreview(); engines[id] = nil; crops[id] = nil
             regions[id]?.hide(); regions[id] = nil
+            cropEditors[id]?.close(); cropEditors[id] = nil
         }
         guard createsEngines else { return }
         for id in ids {
@@ -63,12 +70,30 @@ final class LaneCaptureInputs: ObservableObject {
                 let engine = CameraCaptureEngine(useCaptureHelper: true, automaticallyPreviewsDefaultSource: false)
                 engines[id] = engine
                 engine.setPreviewQuality(PreviewPreferences.shared.quality)
+                engine.setInputCrop(store.project.inputCrops?[id])
                 if let crop, let rect = Self.rect(crop) { engine.setScreenCropRect(rect); crops[id] = crop }
                 engine.selectDevice(id: id)
             } else if let engine = engines[id], !engine.isRecording, !engine.isFinishingRecording, crops[id] != crop {
                 engine.setScreenCropRect(crop.flatMap(Self.rect)); crops[id] = crop
             }
+            if let engine = engines[id], !engine.isRecording, !engine.isFinishingRecording {
+                let crop = store.project.inputCrops?[id]?.normalized
+                let effective = crop == .full ? nil : crop
+                if engine.inputCrop != effective { engine.setInputCrop(effective) }
+            }
         }
+    }
+    func inputIsBusy(_ id: String) -> Bool {
+        lanes(for: id).contains { $0.isArmed || store.laneIsBusy($0.id) } ||
+        engines[id]?.isRecording == true || engines[id]?.isFinishingRecording == true
+    }
+    func showCropEditor(for id: String) {
+        guard let engine = engines[id], !inputIsBusy(id) else { return }
+        if let editor = cropEditors[id], editor.window?.isVisible == true { editor.showWindow(nil); editor.window?.makeKeyAndOrderFront(nil); return }
+        let editor = InputCropWindowController(store: store, inputs: self, engine: engine, sourceID: id)
+        cropEditors[id] = editor
+        editor.showWindow(nil)
+        editor.window?.makeKeyAndOrderFront(nil)
     }
     func region(for id: String) -> CaptureRegionController {
         if let existing = regions[id] { return existing }
@@ -82,6 +107,7 @@ final class LaneCaptureInputs: ObservableObject {
         for lane in lanes(for: id) { store.setLaneCaptureCrop(lane.id, rect: rect) }
     }
     func stopAllPreviews() {
+        cropEditors.values.forEach { $0.close() }; cropEditors.removeAll()
         engines.values.forEach { $0.stopPreview() }
         regions.values.forEach { $0.hide() }
         discovery.stopPreview()

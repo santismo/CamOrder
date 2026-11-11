@@ -5,7 +5,8 @@ public struct CaptureCommand: Codable {
     public var action: String
     public var value: String?
     public var crop: [Double]?
-    public init(_ action: String, value: String? = nil, crop: [Double]? = nil) { self.action = action; self.value = value; self.crop = crop }
+    public var inputCrop: InputCrop?
+    public init(_ action: String, value: String? = nil, crop: [Double]? = nil, inputCrop: InputCrop? = nil) { self.action = action; self.value = value; self.crop = crop; self.inputCrop = inputCrop }
 }
 public struct CaptureStatus: Codable {
     public var devices: [CameraDeviceInfo]

@@ -50,9 +50,19 @@ node --test tests/phone-camera/*.test.mjs
 
 The service worker caches a coherent asset set. Bump its cache version whenever camera assets change. Updates wait until existing app windows close, rather than replacing an active camera session.
 
+## Deferred development ideas
+
+On November 10, 2026, the user confirmed that the USB screen-camera approach is working and giving good results. They asked to revisit the following ideas **next time we work on CamOrder**, rather than implement them now:
+
+- Try a direct camera stream from Safari using `getUserMedia` and WebRTC, with a receiver integrated into CamOrder or its Mac helper. This would send camera video rather than capture the device screen. Start by evaluating a local-network connection and measuring latency, stability and audio alignment.
+- Compare the existing iPhone Continuity Camera input, including USB operation, against the screen-camera approach. Do not assume the iPad has the same native webcam capability.
+- Investigate wired transport alternatives for a browser camera stream if USB remains essential. Do not promise that a webpage can turn an iPad into a USB webcam, or assume the user has accepted Wi-Fi.
+
+Retain the working screen-camera setup. The user's constraints remain: free ongoing use, no paid Apple developer account, no weekly signing/reinstallation, and preferably no dedicated installed phone/tablet app. These are future experiments, not implemented features.
+
 ## Verification
 
 - Automated camera lifecycle checks cover camera-only constraints, cancellation while permissions are pending, out-of-order camera requests, releasing the prior lens before switching, permission-denied recovery, stale failures, muted/ended tracks, and invalid streams.
 - Browser UI checks cover the setup instructions, responsive controls and cancelling a pending camera request. With the local HTTP server stopped, the page reloaded from its service-worker cache and its camera settings remained interactive and persisted across reloads.
 - The local installed CamOrder capture helper discovered the attached iPad and accepted it as an input. The initial probe received **no preview frames**, so that is device-discovery evidence only, not proof of working video.
-- Full iPad/iPhone camera-preview → USB → CamOrder capture, delivered frame rate and audio alignment still require a physical-device test with this app open and the device unlocked.
+- Follow-up on November 10, 2026: the user confirmed the screen-camera feed reaches CamOrder and reported good results. This is user-confirmed functionality; delivered frame rate, latency and audio alignment have not been independently benchmarked.

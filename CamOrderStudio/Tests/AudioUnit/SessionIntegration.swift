@@ -164,6 +164,34 @@ struct SessionIntegration {
             require(asset.duration.seconds > 2.4 && !asset.tracks(withMediaType: .video).isEmpty, "Recorded movie is playable")
             print("PASS: \(pass == 0 ? "Play" : "Record") saves a \(clip.durationSeconds)-second movie at \(clip.timelineStartSeconds) with no plugin editor; playhead follows host")
         }
+        // Reproduce fresh transport positions with a stale first render clock,
+        // including the two offsets observed in the user's failed captures.
+        for (pass, offset) in [-217.0, -34.0, 34.0].enumerated() {
+            let start = 60.0 + Double(pass) * 5
+            let previousCount = session.store.project.timeline.lanes[0].clips.count
+            session.store.armLane(session.store.project.timeline.lanes[0].id)
+            pump(duration: 0.3, position: start, playing: false)
+            let deadline = ProcessInfo.processInfo.systemUptime + 3
+            while capture.lastRecordingStartedHostTime == nil && ProcessInfo.processInfo.systemUptime < deadline {
+                pump(duration: 0.05, position: start, playing: false)
+            }
+            require(capture.lastRecordingStartedHostTime != nil, "Pre-roll has an encoded frame before testing the clock")
+            COTestHostSetNextPlayClockOffset(host, offset)
+            pump(duration: 1.0, position: start, playing: true, recording: pass == 1)
+            require(session.store.pendingTake != nil && abs(session.store.pendingTake!.startSeconds - start) < 0.12,
+                "An offset startup clock cannot place the take ahead of Logic")
+            pump(duration: 0.7, position: start + 1, playing: false)
+            let clips = session.store.project.timeline.lanes[0].clips
+            require(clips.count == previousCount + 1 && session.store.pendingTake == nil && !session.store.hasArmedLane,
+                "Stopping saves the clock-regression take into the armed lane")
+            let clip = clips.last!
+            require(abs(clip.timelineStartSeconds - start) < 0.12 && abs(clip.durationSeconds - 1) < 0.15,
+                "Saved clip has the correct timeline start and duration")
+            let asset = AVURLAsset(url: folder.appendingPathComponent(clip.videoFile))
+            require(asset.duration.seconds > clip.trimInSeconds && !asset.tracks(withMediaType: .video).isEmpty,
+                "Clock-regression take retains playable recorded video")
+        }
+        print("PASS: repeated Play/Record with stale and future first-block clocks saves correctly placed, playable lane clips")
         session.store.armLane(session.store.project.timeline.lanes[0].id)
         pump(duration: 0.3, position: 32, playing: false)
         pump(duration: 1.2, position: 32, playing: true)

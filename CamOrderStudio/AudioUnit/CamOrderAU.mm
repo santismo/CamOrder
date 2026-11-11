@@ -153,8 +153,13 @@ public:
         bridge->musicalTimeValid = musicalResult == noErr && std::isfinite(beat) && std::isfinite(tempo) && tempo > 0;
         bridge->seconds = sample / GetSampleRate();
         bridge->tempo = tempo; bridge->beat = beat;
-        bridge->hostSeconds = (time.mFlags & kAudioTimeStampHostTimeValid) && time.mHostTime != 0
+        const double renderHostSeconds = (time.mFlags & kAudioTimeStampHostTimeValid) && time.mHostTime != 0
             ? time.mHostTime * ticksToSeconds : now;
+        // A fresh transport callback can arrive with a render timestamp left
+        // over from before Play. Anchoring to it shifts an armed take into the
+        // future and Stop then discards a zero-length region. Preserve ordinary
+        // device timing, but use this callback's host clock for implausible times.
+        bridge->hostSeconds = std::abs(renderHostSeconds - now) <= 2 ? renderHostSeconds : now;
         const bool resumedAfterGap = now - bridge->lastRenderSeconds.load() > 0.5;
         bridge->lastRenderSeconds = now;
         bridge->frames = frames;

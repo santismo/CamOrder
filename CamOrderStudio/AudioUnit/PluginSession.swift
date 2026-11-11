@@ -195,6 +195,7 @@ final class PluginSession: NSObject {
         let seconds = canAlign ? max(0, snapshot.seconds + clockOffset) : update.seconds
         lastDiagnostic = ["transportSource": usingTimecode ? "Logic Link" : "Audio Unit", "renderCount": snapshot.renderCount,
             "callbackFailures": snapshot.callbackFailures, "reportedSeconds": snapshot.seconds, "callbackAge": now - snapshot.lastRenderSeconds,
+            "hostSeconds": snapshot.hostSeconds, "startSeconds": snapshot.startSeconds, "startHostSeconds": snapshot.startHostSeconds,
             "callbackStatus": snapshot.callbackStatus, "callbackVersion": snapshot.callbackVersion,
             "reportedPlaying": reportedPlaying, "followingPlaying": update.playing, "tickGap": tickGap,
             "transportSchedulingActive": transportActivity != nil,

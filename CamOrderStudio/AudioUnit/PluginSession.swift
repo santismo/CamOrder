@@ -196,6 +196,7 @@ final class PluginSession: NSObject {
         lastDiagnostic = ["transportSource": usingTimecode ? "Logic Link" : "Audio Unit", "renderCount": snapshot.renderCount,
             "callbackFailures": snapshot.callbackFailures, "reportedSeconds": snapshot.seconds, "callbackAge": now - snapshot.lastRenderSeconds,
             "hostSeconds": snapshot.hostSeconds, "startSeconds": snapshot.startSeconds, "startHostSeconds": snapshot.startHostSeconds,
+            "startAnchorValid": snapshot.startAnchorValid != 0,
             "callbackStatus": snapshot.callbackStatus, "callbackVersion": snapshot.callbackVersion,
             "reportedPlaying": reportedPlaying, "followingPlaying": update.playing, "tickGap": tickGap,
             "transportSchedulingActive": transportActivity != nil,
@@ -272,6 +273,7 @@ final class PluginSession: NSObject {
                     }
                     if let firstFrame = template.recordingStartedHostTime { store.markArmedBufferRecordingStarted(hostTime: firstFrame, laneID: lane.id) }
                     if update.playing && reportedPlaying && reportedSeconds >= 0 && !update.timingDelayed,
+                       usingTimecode || snapshot.startAnchorValid != 0,
                        let buffer = store.armedBuffers[lane.id], let firstFrame = buffer.recordingStartedHostTime {
                         let startSeconds = timecode.map { $0.startSeconds - origin } ?? snapshot.startSeconds
                         let startHost = timecode?.startHostTime ?? snapshot.startHostSeconds

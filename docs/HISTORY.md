@@ -2,16 +2,17 @@
 
 [← Current CamOrder Studio plug-in](../README.md)
 
-CamOrder's current focus is **CamOrder Studio AU 0.8.0**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.8.0) or read its [guide](../CamOrderStudio/README-AU.md).
+CamOrder's current focus is **CamOrder Studio AU 0.10.1**, used as one Audio FX instance on **Logic Pro's Stereo Out**. [Download the current build](https://github.com/santismo/CamOrder/releases/tag/au-v0.10.1) or read its [guide](../CamOrderStudio/README-AU.md).
 
 **Older versions are still available, but they are buggy, unsupported historical builds.** They may contain recording, transport, editing or export problems fixed in later versions. Keep a separate copy of your project before opening it with an older version. Their original instructions describe their behavior at the time and do not replace the current guide.
 
 ## Studio Audio Unit development builds
 
-The [historical AU archive](https://github.com/santismo/CamOrder/releases/tag/legacy-au-archive) preserves the Intel macOS 13+ component, matching source, installer and original guide for each build. These are locally signed, unnotarized builds. Each installer targets the same **CamOrder Studio.component**, so installing an old version replaces the current one after making a backup. Quit Logic first.
+The [historical AU archive](https://github.com/santismo/CamOrder/releases/tag/legacy-au-archive) preserves the Intel macOS 13+ component, matching source, installer and original guide for each build. These are locally signed, unnotarized builds. Each installer targets the same **CamOrder Studio.component**, so installing an old version replaces the current one. The ZIP’s command-line installer makes a backup; keep a copy of the current component before using a PKG to downgrade. Quit Logic first.
 
 | Version | Development stage | Download |
 | --- | --- | --- |
+| 0.8.0 | Individual-window capture and preview reconnection. Superseded by automatic motion, unarmed playback/lane fixes, and reduced previews with automatic idle preparation in 0.10.1. | [0.8.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.8.0) |
 | 0.7.1 | Cross-lane region moves and recorded-position recovery. Superseded by preview reconnection fixes, visible screen-region controls and window capture. | [0.7.1 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.7.1) |
 | 0.7.0 | Live multicamera switching, lane reordering, selected-region preview and bottom controls. Superseded by cross-lane region moves and saved recording positions. | [0.7.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.7.0) |
 | 0.6.0 | Host-tempo snapping, grouped region editing and explicit output layers. Superseded by live multicamera cuts, lane reordering and export status. | [0.6.0 release](https://github.com/santismo/CamOrder/releases/tag/au-v0.6.0) |

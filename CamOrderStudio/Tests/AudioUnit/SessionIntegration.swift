@@ -118,6 +118,30 @@ struct SessionIntegration {
                 RunLoop.main.run(until: Date().addingTimeInterval(0.01))
             }
         }
+        // Ordinary playback must not depend on a record-armed lane or a window.
+        // The scheduling assertion catches the old armed-only activity lifetime;
+        // real AU callbacks then verify the clock and stopped-preview handoff.
+        pump(duration: 0.15, position: 2, playing: false)
+        require(!session.store.hasArmedLane && session.transportActivity != nil, "An unarmed open project keeps transport scheduling active")
+        pump(duration: 0.6, position: 2, playing: true)
+        require(session.sync.isTransportRolling && abs(session.sync.editorSeconds - 2.6) < 0.12, "Unarmed playback follows host with no editor")
+        require(session.store.pendingTake == nil && capture.startedFiles == 0, "Playback alone never records video")
+        pump(duration: 0.3, position: 2.6, playing: false)
+        session.sync.preview(at: 100)
+        pump(duration: 0.5, position: 20, playing: true)
+        require(session.sync.previewSeconds == nil && abs(session.sync.editorSeconds - 20.5) < 0.12, "Unarmed Play releases a stopped edit preview")
+        pump(duration: 0.3, position: 20.5, playing: false)
+        // Attaching and removing the actual editor must not release the session's
+        // timer or its scheduling protection. This window stays off screen.
+        let playbackWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 520), styleMask: [.titled], backing: .buffered, defer: false)
+        playbackWindow.contentView = Unmanaged<NSView>.fromOpaque(createCamOrderView(bridge)).takeRetainedValue()
+        pump(duration: 0.2, position: 20.5, playing: false)
+        playbackWindow.contentView = nil
+        pump(duration: 0.5, position: 40, playing: true)
+        require(abs(session.sync.editorSeconds - 40.5) < 0.12 && session.transportActivity != nil, "Unarmed playback continues after editor removal")
+        pump(duration: 0.3, position: 40.5, playing: false)
+        require(capture.startedFiles == 0 && session.store.pendingTake == nil, "Editor closure and playback never arm a lane")
+        print("PASS: unarmed Play, stopped-preview handoff and closed-editor playback follow real host callbacks without starting capture")
         for pass in 0..<2 {
             let start = 12.0 + Double(pass) * 10
             session.store.armLane(session.store.project.timeline.lanes[0].id)
@@ -130,6 +154,7 @@ struct SessionIntegration {
             require(abs(session.sync.displaySeconds - (start + 2.4)) < 0.12, "Playhead follows host with no editor")
             pump(duration: 0.7, position: start + 2.4, playing: false)
             require(session.store.pendingTake == nil && !session.store.hasArmedLane, "Host Stop saves the take and automatically disarms the lane")
+            require(session.transportActivity != nil, "Automatic disarm retains ordinary playback scheduling")
             let clips = session.store.project.timeline.lanes[0].clips
             require(clips.count == pass + 1, "Each take saved as a clip")
             let clip = clips.last!
@@ -320,6 +345,7 @@ struct SessionIntegration {
             window.orderOut(nil)
         }
         session.close()
+        require(session.transportActivity == nil, "Closing the AU releases its transport activity")
         COTestHostDispose(host)
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         try runRestoredSessionRegression()

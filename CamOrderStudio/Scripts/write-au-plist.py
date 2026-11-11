@@ -2,12 +2,12 @@ import plistlib, sys
 info = {
  'CFBundleIdentifier':'com.santismo.CamOrderStudio.AudioUnit', 'CFBundleName':'CamOrder Studio',
  'CFBundleExecutable':'CamOrderStudioAU', 'CFBundlePackageType':'BNDL',
- 'CFBundleShortVersionString':'0.8.0', 'CFBundleVersion':'800', 'LSMinimumSystemVersion':'13.0',
+ 'CFBundleShortVersionString':'0.10.1', 'CFBundleVersion':'1001', 'LSMinimumSystemVersion':'13.0',
  'NSCameraUsageDescription':'CamOrder Studio records video from your chosen camera.',
  'NSScreenCaptureUsageDescription':'CamOrder Studio records your selected screen region.',
  'NSCameraUseContinuityCameraDeviceType':True,
  'AudioComponents':[{'name':'Santismo: CamOrder Studio','description':'Video capture, editing and movie export for Logic Pro',
- 'manufacturer':'Sntm','subtype':'CmSt','type':'aufx','version':0x00000800,
+ 'manufacturer':'Sntm','subtype':'CmSt','type':'aufx','version':0x00000A01,
  'factoryFunction':'CamOrderStudioAUFactory','sandboxSafe':False,
  'resourceUsage':{'network.client':False, 'temporary-exception.files.all.read-write':True},
  'tags':['Video','Utility']}]

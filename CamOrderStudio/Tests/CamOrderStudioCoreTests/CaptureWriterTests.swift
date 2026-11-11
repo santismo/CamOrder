@@ -61,6 +61,7 @@ final class CaptureWriterTests: XCTestCase {
             let sample = try makeSample(seconds: 2000 + Double(frame) / 30, width: 960, height: 540)
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 writer.queue.async {
+                    writer.previewPublisher?.quality = [.full, .balanced, .light][min(2, frame / 120)]
                     writer.captureOutput(AVCaptureVideoDataOutput(), didOutput: sample, from: AVCaptureConnection(inputPorts: [], output: AVCaptureVideoDataOutput()))
                     continuation.resume()
                 }
@@ -73,6 +74,9 @@ final class CaptureWriterTests: XCTestCase {
         XCTAssertEqual(result.duration, 12, accuracy: 0.06)
         let duration = try await AVURLAsset(url: url).load(.duration)
         XCTAssertEqual(duration.seconds, 12, accuracy: 0.06)
+        let video = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+        let size = try await XCTUnwrap(video.first).load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 960, height: 540), "Switching live preview quality must not downscale the recording")
         XCTAssertNil(result.error)
         XCTAssertGreaterThan(result.previewCount, 240, "Preview should comfortably exceed the old 10-fps limit")
         print("SUSTAINED CAPTURE: 12 seconds, \(result.previewCount) delivered preview frames, \(result.error ?? "no recording warnings")")
@@ -125,6 +129,8 @@ final class CaptureWriterTests: XCTestCase {
         let first = try makeSample(seconds: 100, width: 64, height: 64)
         let second = try makeSample(seconds: 200, width: 128, height: 64)
         let finished = expectation(description: "closed window finalized")
+        let started = expectation(description: "first replacement-window frame encoded")
+        writer.onStarted = { _ in started.fulfill() }
         writer.onFinished = { _, duration, message in
             XCTAssertGreaterThan(duration, 0.1)
             XCTAssertNotNil(message)
@@ -140,6 +146,9 @@ final class CaptureWriterTests: XCTestCase {
             writer.endWindowStream(token: old) // A late stop must not stop the new stream.
             writer.begin(url: url)
         }
+        // Encoder startup can exceed 400 ms on a busy Mac. Measure the take
+        // after its first encoded frame, rather than counting startup as video.
+        await fulfillment(of: [started], timeout: 10)
         try await Task.sleep(nanoseconds: 400_000_000)
         writer.queue.async { writer.endWindowStream(token: current) }
         await fulfillment(of: [finished], timeout: 10)

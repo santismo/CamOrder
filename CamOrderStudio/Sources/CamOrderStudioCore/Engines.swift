@@ -616,14 +616,7 @@ public final class RenderExportEngine: ObservableObject {
     }
 
     private static func renderSize(for settings: ExportSettings) -> CGSize {
-        switch settings.resolution {
-        case .hd1080:
-            return CGSize(width: settings.canvasWidth ?? 1920, height: settings.canvasHeight ?? 1080)
-        case .uhd4k:
-            return CGSize(width: settings.canvasWidth ?? 3840, height: settings.canvasHeight ?? 2160)
-        case .source:
-            return CGSize(width: settings.canvasWidth ?? 1920, height: settings.canvasHeight ?? 1080)
-        }
+        settings.canvasPixelSize
     }
 
     private static func outputFileType(for settings: ExportSettings, destinationURL: URL) -> AVFileType {

@@ -1,4 +1,4 @@
-# CamOrder Studio Audio Unit — 0.8.0 development build
+# CamOrder Studio Audio Unit — 0.10.1 development build
 
 CamOrder Studio runs in a mono or stereo **Audio FX** slot in Logic Pro. Use **one instance on Stereo Out**, with your video lanes inside it. Audio passes through unchanged, with no added audio latency. Normal operation uses Logic’s Audio Unit transport without MIDI routing, but depends on Logic continuing to process that channel. For silent sections or video-only editing, read [Transport and silent playback](#transport-and-silent-playback).
 
@@ -83,7 +83,7 @@ While **paused**, select one or more regions and use **Output Layer** in the tim
 - **4–9** — progressively farther behind the lower numbers.
 - **0 — Automatic**, restoring lane order behind numbered layers.
 
-A **yellow outline** means selected for editing; the numbered badge and colored border identify its output layer. The same ordering is used during Main Stage playback and in the exported movie. The stopped **Edit selection** preview described below temporarily brings your selection forward. If two overlapping regions share a number, the most recently assigned one is in front; equal assignments use lane order. Reassigning **1** brings the chosen region ahead of another layer-1 region. Within one lane and layer, remaining ties use the last overlapping region; different numbered layers can coexist within a lane.
+A **yellow outline** means selected for editing; the numbered badge and colored border identify its output layer. The same ordering is used during Main Stage playback and in the exported movie. The stopped **View selected clip** preview described below temporarily brings your selection forward. If two overlapping regions share a number, the most recently assigned one is in front; equal assignments use lane order. Reassigning **1** brings the chosen region ahead of another layer-1 region. Within one lane and layer, remaining ties use the last overlapping region; different numbered layers can coexist within a lane.
 
 Assignments survive splitting, trimming, copy/paste, Undo and save/reopen. Unassigned regions remain available behind numbered layers, so existing projects keep their previous appearance until you assign layers. A small foreground reveals the videos behind it. Number and editing shortcuts do not apply while you are typing in a text field.
 
@@ -100,13 +100,23 @@ The first nine lanes are numbered from top to bottom. Empty or muted camera choi
 
 ## Reorder camera lanes
 
-Drag the **grip and number beside a lane name** to another lane header. The insertion line indicates whether the lane will move above or below that header. You can cross several lanes in one drag. The header's right-click menu also provides **Move lane up/down**. Lane order saves with the project and supports Undo; the lane's regions, inputs, offsets and automation move together without changing their times. Live-switch numbers follow the new order. Explicit output layers remain assigned; automatic layers follow lane order.
+Drag the **grip and number beside a lane name** up or down to another lane; the pointer can be over the header or the region area. The insertion line indicates whether the lane will move above or below that header. You can cross several lanes in one drag. Hold near the top/bottom of the lane viewport to scroll, or press Escape to cancel. Release to commit one undoable move. The header's right-click menu also provides **Move lane up/down**. Lane order saves with the project and supports Undo; the lane's regions, inputs, offsets and automation move together without changing their times. Live-switch numbers follow the new order. Explicit output layers remain assigned; automatic layers follow lane order.
 
 ## Animate video framing
 
 Select a region, stop at the first desired position, set its framing, and press **M** or **Marker** in the timeline toolbar. Move the playhead to another position, add another marker, then change zoom, position or rotation. Once a clip has markers, framing edits update or add the pose at the current playhead; they no longer move every marker together. Each drag is one Undo step. Click a flag in the timeline to preview and edit that point while stopped. Animation plays in Main Stage and export, including after splits and trims.
 
-While stopped, **Edit selection** in Main Stage brings the selected region forward so you can frame it even underneath another video. This is a preview at times within that region, including muted or disabled selections; it does not change output layers or exports. Scrub with the ruler or click a marker to keep the selection while positioning automation. Turn **Edit selection** off to inspect the final composition. Starting playback always shows the actual output order. Click empty timeline space, the black margin outside the canvas, or the deselect icon beside **Edit selection** to clear the selection.
+While stopped, **View selected clip** in Main Stage brings the selected region forward so you can frame it even underneath another video. This is a preview at times within that region, including muted or disabled selections; it does not change output layers or exports. Scrub with the ruler or click a marker to keep the selection while positioning automation. Turn **View selected clip** off to inspect the final composition. Starting playback always shows the actual output order. Click empty timeline space, the black margin outside the canvas, or the deselect icon beside **View selected clip** to clear the selection.
+
+## Automatic zoom and pan
+
+Select a region, or Shift-click several, then click the **Motion** button (wand icon) in the timeline toolbar. Right-click **Motion…** opens the same panel. Choose zoom **In/Out** and/or a pan direction, including diagonals. **Subtle**, **Gentle** and **Bold** set starting amounts; the Zoom and Travel sliders let you refine them. Travel is a percentage of the canvas width/height, and pan describes the direction the camera looks (the image moves the opposite way).
+
+Click or drag on the still preview to choose a zoom focal point, or press **Center**. The play button previews a four-second loop of the proposed framing on a still image; it does not start Logic. Each selected region receives a full move across its own current trimmed length. The preview shows the active region; applying also uses each other selected video's dimensions.
+
+**Keep edges covered**, on by default, adds enough crop to fill the project's canvas throughout the move, including rotated framing and portrait sources. It can require substantial crop when source and canvas proportions differ. Turn it off for smaller overlay videos. This covers the source's outer edges; black bars already baked into a recording remain part of that video. Changing the canvas, extending a region or editing its markers afterward can require applying motion again.
+
+Choose **Add to existing** to combine with current automation; applying again can stack another move. **Replace** clears its old markers and starts from the region's current opening framing. **Apply motion** creates ordinary editable automation markers. One Undo restores the entire selection, even across lanes. Original media, trimmed source positions, timeline positions, layering and sync offsets are unchanged; generated animation plays through the normal Main Stage/export path. Combined curves use sampled linear markers to avoid pausing at every intermediate point.
 
 ## Export progress and location
 
@@ -214,25 +224,45 @@ Alternatively, **Utility → Test Oscillator** on the dedicated track can provid
 
 Live frames now update a native image layer directly. Timeline geometry and filmstrips no longer rebuild with every playhead tick; moving cursors and clocks update separately. Playback seeks are serialized, and resuming the decoder uses the requested host-clock anchor so seek completion does not leave a persistent playback delay.
 
-The synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **358 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
+Earlier-build measurements: the synthetic 30 fps playback check delivered **51 decoded frames over 1.7 seconds**. A 12-second capture test delivered **358 preview frames**, with no recording warnings. These checks do not measure camera latency or end-to-end synchronization with Logic’s audio; use a visible/audio cue to choose your own offset for the actual camera and session.
 
 ## Verification
 
-- 62 Swift tests: clock-format parsing, signed correction and boundary conversion, drop-frame labels and invalid input, independent lane + master offsets baked into fixed-start exports, overlapping video layers, matching pan/rotation directions, real MOV/MP4 exports, trimmed first-frame colors, audio cue alignment after offsets, custom export ranges, negative offsets, save/reopen compatibility, layer priority, splits, animated framing, capture and preview delivery, viewport centering/pinch geometry, stopped preview handoff, and transport gaps.
-- Region editing regression: host beat/tempo phase at 88 BPM, Shift-selection and group cut/move/trim with independent offsets, source limits, numbered output layers, grouped clipboard and Undo; native left/right edge mouse gestures, narrow regions and project zero, one-step Undo, copy/paste with independent destination offsets, preserved trims/framing/automation, repeated paste, deleted-source recovery, project isolation, save/reopen and ⌘C/⌘V/⌘S dispatch.
-- Calculator session regression: project/lane Apply, existing-offset refinement, save/reopen, Undo, repeated/stale/out-of-range protection and inputs retained across editor recreation.
-- Installed-component validation with Apple’s `auval` for `aufx / CmSt / Sntm`.
-- Bit-exact mono/stereo pass-through at 44.1, 48 and 96 kHz, including silent input and 1/64/512-frame blocks; independent Audio Unit instance state.
-- Native editor creation, close/reopen and screenshots at 1280 × 820, 820 × 520, 1120 × 460, 760 × 440, arbitrary 803 × 417, and minimum 720 × 360; the four-input overview is also captured at 1280 × 960.
-- Production recording session with no editor: Play/Record, host following, Stop, repeated takes, missing callbacks and manual finalization, using real encoded synthetic-camera movies, plus automatic disarming and AU restoration before editor creation.
-- Multi-input session regression: three lanes sharing one camera/file, three different cameras with one disconnecting mid-take, independent late arm/stop on a shared camera, four simultaneous encoded movies, and assignment save/reopen.
-- Four capture helpers running together with isolated command channels and clean shutdown, without activating physical cameras.
-- Isolated CoreMIDI fallback transport with no AU processing, R/Space forwarding, actual SwiftUI canvas and window-grip drags, native lane-name Return/click-away focus, distant timeline scrolling/pinch anchoring, and saved edit/offset/armed-undo/marker regressions.
-- Capture-helper launch, input discovery and clean shutdown without activating a physical camera.
+The 0.9.2 baseline passed **83 Swift tests**, including actual MOV/MP4 rendering of automatic motion, independent sync offsets, multi-layer output, capture, editing, Undo/Redo and native lane drags with autoscroll and cancellation. The native session harness also verifies **playback with every lane disarmed**, paused-preview handoff, editor closure, R/Space forwarding, automatic disarming, restoration and simultaneous cameras.
 
-A verification summary and screenshots are included in the release. The actual Logic session and physical camera combination still need a user check after restart. The download is a locally signed development build for **Intel Macs, macOS 13 or newer**, not a notarized or universal distribution release.
+AU 0.9.2 keeps its transport scheduling activity while a video project is open, so ordinary playback receives the same scheduling protection as armed recording. This activity survives closing the editor and ends when the project/session closes. It does not arm a lane or record video. Transport still uses Logic's positions; missing callbacks freeze the display instead of inventing motion. Playback diagnostics now include callback state and timer gaps even when disarmed.
+
+The **Motion** label is beside the timeline editing buttons and also appears in the region's right-click menu. **View selected clip** (previously Edit selection) changes only the stopped preview, to expose a selected clip under another layer; it is not a transport mode and does not change the export. It makes no visible difference when that clip is already on top.
+
+See the [0.10.1 verification record](../docs/VERIFICATION-0.10.1.md) (or `VERIFICATION.md` in the ZIP) for this release’s test record and limits. The [0.9.2 record](../docs/VERIFICATION-0.9.2.md) documents the prior playback and lane fixes retained in this build. It is an **Intel/macOS 13+ development build**, with a locally signed AU and an unsigned, non-notarized installer. The Logic follow-up confirmed playback while audio passes through Stereo Out, with the silent-section limitation described above. Automated host tests do not establish continuous transport in silent Logic sessions, and the quiet-audio workaround remains unverified.
 
 An old cut made before the 0.2.5 fixes may already contain an incorrect saved source start. The app cannot safely infer its intended content; redo an affected old cut from the original take. Original media remains intact.
+
+## Preview quality
+
+The **Preview** menu under Main Stage controls display quality in the AU. **Balanced** is the default and the choice is remembered across Logic sessions. This is a preview preference, not a project/export setting.
+
+| Mode | Live Inputs maximum | Prepared playback maximum |
+| --- | --- | --- |
+| Full | 960 × 640 (previous live-preview limit) | Original file |
+| Balanced | 640 × 480 | 1280 × 720 H.264 preview copy |
+| Light | 320 × 240 | 640 × 480 H.264 preview copy |
+
+Aspect ratio is preserved, so 16:9 live frames are 960 × 540, 640 × 360, and 320 × 180 respectively. The existing live preview cadence (about 30 fps for a 30 fps source) is retained. Changing modes updates all camera helpers without restarting a capture session. The recording encoder still receives the original full-size samples.
+
+For lighter **recorded playback**, choose Balanced or Light. New and unprepared video files prepare **automatically after one idle second**, while Main Stage is visible, playback is stopped, every video lane is disarmed, and no take or movie export is active. Files are processed one at a time. Ready copies are reused; small originals need no conversion. Full uses original files and never starts preparation.
+
+Starting playback, arming, recording, exporting, or closing Main Stage cancels unfinished conversion. When you return to an idle state or reopen the view, pending clips resume automatically. Completed copies are kept. Existing ready clips remain available as new media joins the queue. The preparation list resolves media paths only when project media changes.
+
+**Prepare now** starts immediately while idle, or retries failed files. **Pause previews** pauses the current idle period; Prepare now or the next activity/idle cycle resumes it. Failed files fall back to originals and are not repeatedly retried in the background. The status reports preparation, waiting, readiness and failures.
+
+These copies change neither project media paths nor the files used for final movie export. Source trims, sync offsets, portrait orientation, framing and motion continue to use the same source time. Preparation adds encoding work while idle, but is cancelled when the app reports playback or capture activity.
+
+Preview copies use disk space in `~/Library/Caches/com.santismo.CamOrderStudio/Preview-v1/`. They are disposable: quit Logic before deleting that folder in Finder to recover the space, then prepare again if wanted. Changes to a source's path, size or modification date invalidate its old cache entry. The cache is local to this Mac and is not included in the project.
+
+Three simultaneous full-quality recordings still require three encoders. These settings reduce preview work; they do not guarantee a particular overall CPU reduction or cure missing Logic transport callbacks. The user reports that enabling Logic's metronome improves playback on their setup; this is recorded as a practical observation, not a general transport fix.
+
+This 0.10.1 local release retains the exact 0.10.0 capture helper and its signing identity. The automation change is in the AU editor. The ZIP’s command-line installer backs up the previous component and does not close Logic. A normal source rebuild can re-sign the helper; these local release packages retain the verified helper.
 
 ## Build and uninstall
 

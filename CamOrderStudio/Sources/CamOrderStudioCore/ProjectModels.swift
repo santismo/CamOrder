@@ -244,7 +244,7 @@ public struct VideoClip: Codable, Equatable, Identifiable, Sendable {
             let end = markers[index + 1]
             guard seconds >= start.timeSeconds, seconds <= end.timeSeconds else { continue }
             let progress = (seconds - start.timeSeconds) / max(0.001, end.timeSeconds - start.timeSeconds)
-            return ClipFraming.interpolate(from: start.framing, to: end.framing, progress: progress)
+            return ClipFraming.interpolate(from: start.framing, to: end.framing, progress: progress, eased: start.interpolation != .linear)
         }
 
         return baseFraming
@@ -331,9 +331,9 @@ public struct ClipFraming: Codable, Equatable, Sendable {
         rotationDegrees = try container.decodeIfPresent(Double.self, forKey: .rotationDegrees) ?? 0
     }
 
-    public static func interpolate(from start: ClipFraming, to end: ClipFraming, progress: Double) -> ClipFraming {
+    public static func interpolate(from start: ClipFraming, to end: ClipFraming, progress: Double, eased: Bool = true) -> ClipFraming {
         let clampedProgress = max(0, min(1, progress))
-        let easedProgress = clampedProgress * clampedProgress * (3 - 2 * clampedProgress)
+        let easedProgress = eased ? clampedProgress * clampedProgress * (3 - 2 * clampedProgress) : clampedProgress
         return ClipFraming(
             zoom: interpolate(start.zoom, end.zoom, easedProgress),
             offsetX: interpolate(start.offsetX, end.offsetX, easedProgress),
@@ -358,15 +358,20 @@ public struct ClipFraming: Codable, Equatable, Sendable {
     }
 }
 
+public enum FramingInterpolation: String, Codable, Sendable { case smooth, linear }
+
 public struct ClipAutomationMarker: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var timeSeconds: Double
     public var framing: ClipFraming
+    /// Nil preserves the smooth interpolation of older projects.
+    public var interpolation: FramingInterpolation?
 
-    public init(id: String = UUID().uuidString, timeSeconds: Double, framing: ClipFraming) {
+    public init(id: String = UUID().uuidString, timeSeconds: Double, framing: ClipFraming, interpolation: FramingInterpolation? = nil) {
         self.id = id
         self.timeSeconds = max(0, timeSeconds)
         self.framing = framing
+        self.interpolation = interpolation
     }
 }
 
@@ -550,6 +555,12 @@ public struct ExportSettings: Codable, Equatable, Sendable {
     public var audioMode: ExportAudioMode
     public var canvasWidth: Int?
     public var canvasHeight: Int?
+
+    /// Shared canvas geometry for Main Stage, automatic framing and export.
+    public var canvasPixelSize: CGSize {
+        CGSize(width: canvasWidth ?? (resolution == .uhd4k ? 3840 : 1920),
+               height: canvasHeight ?? (resolution == .uhd4k ? 2160 : 1080))
+    }
 
     public init(container: ExportContainer = .mov, resolution: ExportResolution = .hd1080, frameRate: FrameRate = .fps30, audioMode: ExportAudioMode = .muteAll, canvasWidth: Int? = 1920, canvasHeight: Int? = 1080) {
         self.container = container

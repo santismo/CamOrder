@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.8.0").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.10.1").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -767,6 +767,16 @@ private struct PlaybackPreviewPane: View {
     private let canvasHandleOutset: CGFloat = 26
     @State private var liveCanvasPixelSize: CGSize?
     @State private var previewSelection = true
+    @ObservedObject private var preferences = PreviewPreferences.shared
+    @StateObject private var previews = PlaybackPreviewController()
+    @State private var exporting = false
+    @State private var previewSources: [URL] = []
+    @State private var previewVisible = false
+
+    private var previewRequest: PlaybackPreviewController.Request {
+        .init(sources: previewSources, quality: preferences.quality)
+    }
+    private var previewBusy: Bool { isPlaying || store.hasArmedLane || store.hasCaptureActivity || exporting }
 
     private var playheadSeconds: Double {
         editPlayback.seconds(sync: syncEngine)
@@ -781,9 +791,9 @@ private struct PlaybackPreviewPane: View {
             HStack {
                 SectionHeader("Main Stage")
                 if store.selectedClipId != nil, !isPlaying {
-                    Toggle("Edit selection", isOn: $previewSelection)
+                    Toggle("View selected clip", isOn: $previewSelection)
                         .toggleStyle(.button).controlSize(.mini)
-                        .help("Bring the selected region forward for framing only. Playback and export keep the output layers.")
+                        .help("While paused, bring the selected region forward to adjust it. This changes only the preview, not layers or export. Turn off to view the final composition.")
                     Button { store.setRegionSelection([]) } label: { Image(systemName: "xmark.circle") }
                         .buttonStyle(.plain).help("Deselect region and show output")
                 }
@@ -793,6 +803,22 @@ private struct PlaybackPreviewPane: View {
                     .foregroundStyle(.secondary)
                     .padding(.trailing, 8)
             }
+            HStack(spacing: 8) {
+                Picker("Preview", selection: $preferences.quality) {
+                    ForEach(PreviewQuality.allCases) { Text($0.title).tag($0) }
+                }.frame(width: 160)
+                    .help("Display quality only. Balanced and Light reduce live previews immediately. Playback copies prepare automatically when stopped and disarmed. Recording and export stay at original quality.")
+                if preferences.quality != .full {
+                    Button(previews.isPreparing ? "Pause previews" : "Prepare now") {
+                        if previews.isPreparing { previews.stop() } else { previews.prepare() }
+                    }.disabled(previewBusy || previews.isCheckingCache || previewRequest.sources.isEmpty)
+                        .help("New clips prepare automatically after one idle second while stopped and disarmed. Prepare now starts immediately or retries failed files. Pause previews pauses until the next transport/arm cycle or reopening this view. Starting playback, arming or exporting suspends work; ready copies are kept.")
+                    Text(previews.message)
+                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        .help(previews.message)
+                }
+                Spacer(minLength: 0)
+            }.controlSize(.small).padding(.horizontal, 8).padding(.bottom, 4)
             let clips = store.project.stageClips(at: playheadSeconds, selectedClipID: store.selectedClipId,
                 previewSelection: previewSelection && !isPlaying && !store.hasCaptureActivity)
             if !clips.isEmpty {
@@ -804,7 +830,7 @@ private struct PlaybackPreviewPane: View {
                         Color.black
                         PlaybackCanvasView(
                             previewSize: previewSize, canvasSize: canvasSize, canvasPixelSize: canvasPixels,
-                            clips: clips, playheadSeconds: playheadSeconds, isPlaying: isPlaying,
+                            clips: clips, previewURLs: preferences.quality == .full ? [:] : previews.urls, playheadSeconds: playheadSeconds, isPlaying: isPlaying,
                             onCanvasPixelSizeChanged: { liveCanvasPixelSize = $0 },
                             onCanvasPixelSizeCommitted: { pixels in
                                 liveCanvasPixelSize = nil
@@ -840,25 +866,40 @@ private struct PlaybackPreviewPane: View {
             }
         }
         .onChange(of: store.selectedClipId) { _ in previewSelection = true }
+        .onAppear { previewVisible = true; refreshPreviewSources(); updatePreviews() }
+        .onChange(of: store.project.media) { _ in refreshPreviewSources() }
+        .onChange(of: store.document?.folderURL) { _ in refreshPreviewSources() }
+        .onChange(of: previewRequest) { _ in updatePreviews() }
+        .onChange(of: previewBusy) { _ in updatePreviews() }
+        .onReceive(store.exportController.$isRendering) { value in
+            exporting = value
+            updatePreviews()
+        }
+        .onDisappear { previewVisible = false; updatePreviews() }
+    }
+
+    private func updatePreviews() {
+        previews.update(previewRequest, isIdle: previewVisible && !previewBusy)
+    }
+
+    private func refreshPreviewSources() {
+        // Resolve paths only when media changes, never on every playhead tick.
+        var seen = Set<URL>()
+        previewSources = store.project.media.filter { $0.kind == .video }
+            .compactMap { store.absoluteURL(for: $0) }.filter { seen.insert($0).inserted }
     }
 
     private var projectCanvasPixelSize: CGSize {
-        CGSize(
-            width: CGFloat(max(1, store.project.exportSettings.canvasWidth ?? 1920)),
-            height: CGFloat(max(1, store.project.exportSettings.canvasHeight ?? 1080))
-        )
+        let size = store.project.exportSettings.canvasPixelSize
+        return CGSize(width: max(1, size.width), height: max(1, size.height))
     }
 
     private var canvasAspectRatio: CGFloat {
-        let width = max(1, store.project.exportSettings.canvasWidth ?? 1920)
-        let height = max(1, store.project.exportSettings.canvasHeight ?? 1080)
-        return CGFloat(width) / CGFloat(height)
+        projectCanvasPixelSize.width / projectCanvasPixelSize.height
     }
 
     private var canvasLabel: String {
-        let width = store.project.exportSettings.canvasWidth ?? 1920
-        let height = store.project.exportSettings.canvasHeight ?? 1080
-        return "\(width)x\(height) \(store.project.exportSettings.container.displayName)"
+        "\(Int(projectCanvasPixelSize.width))x\(Int(projectCanvasPixelSize.height)) \(store.project.exportSettings.container.displayName)"
     }
 
     private func canvasDisplaySize(in availableSize: CGSize, canvasPixels: CGSize) -> CGSize {
@@ -875,6 +916,7 @@ private struct PlaybackCanvasView: View {
     let canvasSize: CGSize
     let canvasPixelSize: CGSize
     let clips: [VideoClip]
+    let previewURLs: [URL: URL]
     let playheadSeconds: Double
     let isPlaying: Bool
     let onCanvasPixelSizeChanged: (CGSize) -> Void
@@ -896,7 +938,7 @@ private struct PlaybackCanvasView: View {
                 ForEach(Array(PlaybackSlot.slots(for: clips).reversed())) { slot in
                     let clip = slot.clip
                     if let asset = store.mediaAsset(for: clip), let url = store.absoluteURL(for: asset) {
-                        PlaybackPlayerView(url: url, clipStartSeconds: clip.timelineStartSeconds,
+                        PlaybackPlayerView(url: previewURLs[url] ?? url, clipStartSeconds: clip.timelineStartSeconds,
                             trimInSeconds: clip.trimInSeconds, playbackSyncOffsetSeconds: store.effectivePlaybackSyncOffsetSeconds(for: clip),
                             playheadSeconds: playheadSeconds, isPlaying: isPlaying, framing: framing(clip))
                             .allowsHitTesting(false)
@@ -1762,6 +1804,8 @@ private struct TimelineView: View {
     var compact = false
     var controlsAtBottom = false
     @State private var followedSeconds = 0.0
+    @State private var showMotion = false
+    @StateObject private var laneReorder = LaneReorderController()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1773,9 +1817,9 @@ private struct TimelineView: View {
                         .font(.caption.bold())
                         .frame(width: 150, height: 28, alignment: .leading)
                     ForEach(store.project.timeline.lanes) { lane in
-                        LaneHeader(lane: lane)
+                        LaneHeader(lane: lane, reorder: laneReorder)
                             .frame(width: 150, height: 56, alignment: .leading)
-                            .modifier(LaneReorderTarget(store: store, laneID: lane.id))
+                            .modifier(LaneReorderTarget(controller: laneReorder, laneID: lane.id))
                     }
                     if store.project.audio.masteredAudioFile != nil { Text("Master Audio")
                         .font(.caption.bold())
@@ -1882,6 +1926,10 @@ private struct TimelineView: View {
                                                         store.selectRegion(clip.id, preserveGroup: true); store.snapSelectedClipEndToGrid()
                                                     }
                                                     Divider()
+                                                    Button("Motion…") {
+                                                        store.selectRegion(clip.id, preserveGroup: true)
+                                                        showMotion = true
+                                                    }
                                                     Button {
                                                         store.selectRegion(clip.id, preserveGroup: true)
                                                         store.selectedMediaAssetId = clip.mediaAssetId
@@ -1918,6 +1966,7 @@ private struct TimelineView: View {
                                                 .offset(x: (pending.startSeconds + offset) * secondsToPixels)
                                         }
                                     }
+                                    .modifier(LaneReorderTarget(controller: laneReorder, laneID: lane.id, registerGeometry: false))
                                     .zIndex(regionDragZIndex(for: lane))
                                 }
                                 if store.project.audio.masteredAudioFile != nil { Rectangle()
@@ -1974,6 +2023,11 @@ private struct TimelineView: View {
                 Divider()
                     .frame(height: 18)
                 HStack(spacing: 4) {
+                    Button { showMotion = true } label: { Label("Motion", systemImage: "wand.and.stars") }
+                        .help("Motion: automatic zoom and pan for selected regions")
+                        .accessibilityLabel("Motion")
+                        .disabled(store.selectedClipIDs.isEmpty || store.isApplyingMotion)
+                        .popover(isPresented: $showMotion) { MotionPane().environmentObject(store) }
                     Button {
                         store.insertAutomationMarker(at: activePlayheadSeconds)
                     } label: {
@@ -2340,12 +2394,13 @@ private final class PlaybackPlayerNSView: NSView {
 private struct LaneHeader: View {
     @EnvironmentObject private var store: ProjectStore
     let lane: VideoLane
+    let reorder: LaneReorderController
     @State private var showOffset = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
-                LaneReorderGrip(laneID: lane.id, number: laneNumber, projectPath: store.document?.folderURL.path ?? "")
+                LaneReorderGrip(laneID: lane.id, number: laneNumber, store: store, controller: reorder)
                 LaneNameEditor(name: lane.name) { store.renameLane(lane.id, name: $0) }.frame(height: 17)
             }
             if let inputs = store.captureInputs {

@@ -166,9 +166,18 @@ int main(int argc, char **argv) {
             NSDate *end = [NSDate dateWithTimeIntervalSinceNow:2];
             while (end.timeIntervalSinceNow > 0) [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.02]];
             [view layoutSubtreeIfNeeded];
-            auto bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
-            [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
-            [[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:@(argv[2]) atomically:YES];
+            // Include native control layers; cacheDisplay alone omits them.
+            // The capture is restricted to this harness's own window.
+            auto captureWindow = ^(NSString *path) {
+                CGImageRef image = CGWindowListCreateImage(CGRectNull, kCGWindowListOptionIncludingWindow,
+                    (CGWindowID)window.windowNumber, kCGWindowImageBoundsIgnoreFraming | kCGWindowImageBestResolution);
+                if (image) {
+                    auto bitmap = [[NSBitmapImageRep alloc] initWithCGImage:image];
+                    [[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
+                    CGImageRelease(image);
+                }
+            };
+            captureWindow(@(argv[2]));
             require((window.styleMask & NSWindowStyleMaskResizable) != 0, "editor window is resizable");
             for (NSValue *value in @[[NSValue valueWithSize:NSMakeSize(820,520)], [NSValue valueWithSize:NSMakeSize(1120,460)], [NSValue valueWithSize:NSMakeSize(760,440)], [NSValue valueWithSize:NSMakeSize(803,417)], [NSValue valueWithSize:NSMakeSize(720,360)]]) {
                 NSSize size = value.sizeValue;
@@ -177,11 +186,9 @@ int main(int argc, char **argv) {
                 [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.4]];
                 [view layoutSubtreeIfNeeded];
                 require(fabs(view.bounds.size.width - size.width) < 1 && fabs(view.bounds.size.height - size.height) < 1, "editor accepts small and flat sizes");
-                auto resizedBitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
-                [view cacheDisplayInRect:view.bounds toBitmapImageRep:resizedBitmap];
                 NSString *suffix = size.width == 720 ? @"-compact.png" : (size.width == 803 ? @"-free.png" : (size.width == 760 ? @"-minimum.png" : (size.width < 1000 ? @"-small.png" : @"-flat.png")));
                 NSString *path = [[@(argv[2]) stringByDeletingPathExtension] stringByAppendingString:suffix];
-                [[resizedBitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
+                captureWindow(path);
             }
             puts("PASS: resizable editor at 820 x 520 and 1120 x 460, with stage, live input and timeline");
             // Closing/reopening the editor must reuse its session without crashing.

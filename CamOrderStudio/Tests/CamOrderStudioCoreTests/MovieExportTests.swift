@@ -5,6 +5,42 @@ import AppKit
 
 final class MovieExportTests: XCTestCase {
     @MainActor
+    func testAutomaticPanZoomExportCoversEveryFrameIncludingRotatingExistingMotion() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fixture = try XCTUnwrap(Bundle.module.url(forResource: "red", withExtension: "mp4", subdirectory: "Fixtures"))
+        try FileManager.default.copyItem(at: fixture, to: folder.appendingPathComponent("red.mov"))
+        var project = CamOrderProject.empty(name: "Automatic motion")
+        project.exportSettings.canvasWidth = 128; project.exportSettings.canvasHeight = 72
+        project.exportSettings.audioMode = .muteAll
+        project.media = [MediaAsset(id: "red", kind: .video, displayName: "Red", relativePath: "red.mov")]
+        var clip = VideoClip(clipId: "motion", mediaAssetId: "red", videoFile: "red.mov", armedLaneId: "lane_1",
+                             logicStartTimecode: .from(seconds: 3, frameRate: .fps30), logicStartSeconds: 3, durationSeconds: 0.9, frameRate: .fps30)
+        clip.automationMarkers = [ClipAutomationMarker(timeSeconds: 0, framing: ClipFraming(rotationDegrees: -20)),
+                                  ClipAutomationMarker(timeSeconds: 0.9, framing: ClipFraming(rotationDegrees: 30))]
+        var motion = AutomaticMotion(); motion.zoom = .zoomOut; motion.pan = .upRight
+        motion.focalX = 0.7; motion.focalY = -0.5; motion.zoomAmount = 0.35; motion.panAmount = 0.16
+        clip = try motion.applying(to: clip, sourceSize: CGSize(width: 64, height: 64), canvasSize: CGSize(width: 128, height: 72))
+        project.timeline.lanes[0].clips = [clip]
+        for container in [ExportContainer.mov, .mp4] {
+            let output = folder.appendingPathComponent("motion" + container.displayName)
+            project.exportSettings.container = container
+            try await RenderExportEngine().export(project: project, from: folder, to: output, range: MovieExportRange(startSeconds: 3, endSeconds: 3.9))
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: output))
+            generator.requestedTimeToleranceBefore = .zero; generator.requestedTimeToleranceAfter = .zero
+            for index in 0..<26 {
+                let image = try generator.copyCGImage(at: CMTime(value: Int64(index), timescale: 30), actualTime: nil)
+                let bitmap = NSBitmapImageRep(cgImage: image)
+                for x in [1, image.width / 2, image.width - 2] { for y in [1, image.height / 2, image.height - 2] {
+                    let color = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                    XCTAssertGreaterThan(color.redComponent, 0.8, "Exposed edge in \(container), frame \(index), \(x)/\(y)")
+                } }
+            }
+        }
+    }
+
+    @MainActor
     func testLiveCameraCutsRenderTheChosenLaneWithIndependentOffsets() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

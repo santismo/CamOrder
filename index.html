@@ -136,6 +136,7 @@
             <a class="button" href="https://github.com/santismo/CamOrder/releases/latest/download/CamOrder-Studio-Intel.dmg">Download for Mac</a>
             <a href="#workflow">See the workflow ↓</a>
           </div>
+          <p class="compat"><a href="https://github.com/santismo/CamOrder/releases/tag/au-v0.10.1">Version 0.10.1</a> · Lighter previews, prepared automatically when you stop.</p>
         </div>
         <figure id="loop-idea">
           <video controls playsinline preload="metadata" poster="docs/media/loop-idea-poster.jpg" width="1280" height="720" aria-label="Play a three-part performance made with CamOrder" aria-describedby="loop-caption">
@@ -266,7 +267,7 @@
           </div>
         </div>
         <p class="layer-guide"><strong>Selection is for editing; layer numbers set the picture.</strong> The numbered badge and colored border show a region’s output layer. A yellow outline shows what you’ve selected. Resize or move a foreground shot to reveal other videos behind it. You can also assign layers with the <strong>Output Layer</strong> control.</p>
-        <p class="layer-guide"><strong>Frame the shot underneath.</strong> While paused, <strong>Edit selection</strong> brings your selected video forward so you can set pan and zoom markers even behind another shot. Playback and export keep the actual layer order. Click empty timeline space or the black margin outside the canvas to deselect.</p>
+        <p class="layer-guide"><strong>Frame the shot underneath.</strong> While paused, <strong>View selected clip</strong> brings your selected video forward so you can set pan and zoom markers even behind another shot. Playback and export keep the actual layer order. Click empty timeline space or the black margin outside the canvas to deselect.</p>
         <p class="note"><strong>Your layout, your way.</strong> Choose <strong>View → Controls at bottom</strong> for Main Stage first, timeline below, and editing/project controls underneath. Export shows its percentage and a finished notice; the folder icon beside it reveals your movie in Finder.</p>
         <p class="note">Turn on <strong>Snap</strong> and choose a beat or subdivision for cuts, moves and trims that follow Logic’s detected tempo. Shift-click your camera regions, position the playhead, then press T to cut them together. Pinch the timeline to zoom. Save your Logic project separately too.</p>
       </section>
@@ -280,6 +281,7 @@
           <li>Open the project menu beside <strong>CamOrder</strong>, choose <strong>New Project…</strong>, and save the CamOrder project alongside your Logic project. Keep the whole <strong>.camorderstudio</strong> folder when moving or sharing it; it contains the video media.</li>
         </ol>
         <p>Then follow the <a href="#recording">recording steps below</a> to choose cameras and start a take.</p>
+        <p class="note" id="preview-quality"><strong>Lighter previews for busy sessions.</strong> Under Main Stage, choose <strong>Preview → Balanced or Light</strong>. New clips prepare automatically after one idle second while Main Stage is open, playback is stopped and all video lanes are disarmed. Preparation suspends when playback, recording or export starts, and picks up pending clips when you are idle again. Ready previews are reused; your original recordings and final exports keep their quality. <strong>Prepare now</strong> and <strong>Pause previews</strong> give you manual control.</p>
         <p>Normal playback follows Logic without MIDI routing while Logic processes Stereo Out. During silence, timing can pause; see <a href="#silent-playback">editing through silence</a> below. Audio passes through unchanged; recorded takes are video-only. Import a bounced master if you want audio in the exported movie.</p>
         <p><a href="https://github.com/santismo/CamOrder/releases/latest/download/CamOrder-Studio-Installer-Intel.pkg">Direct installer download</a> · <a href="https://github.com/santismo/CamOrder/releases/latest">ZIP alternative &amp; release notes</a></p>
         <p class="compat"><strong>Intel Mac · macOS 13+.</strong> Development build; the installer is unsigned and not notarized. macOS may require approval in <strong>System Settings → Privacy &amp; Security</strong> after you first open it. Follow <a href="https://support.apple.com/102445">Apple’s instructions</a> only if you trust the download. Apple silicon source builds have not been validated. See the <a href="https://github.com/santismo/CamOrder/blob/main/CamOrderStudio/README-AU.md">user guide</a> for compatibility and permissions.</p>

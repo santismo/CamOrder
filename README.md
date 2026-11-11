@@ -14,6 +14,8 @@ Record your cameras or screen, cut to your music, animate your shots, and export
 
 See a [six-lane arrangement and its finished performance](https://santismo.github.io/CamOrder/#full-session), including the saved cuts and framing automation.
 
+**Current release: [0.10.1](https://github.com/santismo/CamOrder/releases/tag/au-v0.10.1).** Choose Full, Balanced or Light previews. In Balanced or Light, new clips prepare automatically while Main Stage is open, playback is stopped and all lanes are disarmed. Original recordings and final exports keep their quality.
+
 ## Start recording in Logic
 
 CamOrder runs as an Audio Unit effect. Use one instance on Stereo Out for the whole video project; your audio passes through unchanged.
@@ -40,6 +42,8 @@ Webcams, macOS-exposed iPhone/Continuity Camera inputs, main-display screen or r
 
 ## Edit and export
 
+- **Lighter previews:** Balanced is the default; Light reduces live-preview size further. Playback copies prepare automatically after one idle second, suspend when playback/recording begins, and reuse completed files. **Prepare now** and **Pause previews** remain available. See [preview quality](CamOrderStudio/README-AU.md#preview-quality).
+- **Automatic motion:** select one or several regions and use **Motion** to create zoom/pan animation while preserving source timing and trims.
 - A dark, freely resizable editor with adjustable Main Stage, Live Inputs and timeline panels. Inspector, Media and Sync controls open when needed.
 - Undo deleted regions while armed, commit lane names with Return or an outside click, and pinch to zoom a timeline that follows the playhead.
 - A visible **Save** button and **⌘S**, larger draggable region edges, and **⌘C / ⌘V** to repeat edited regions at the playhead. Copy/paste retains trims, framing and animation and supports Undo.
@@ -49,7 +53,7 @@ Webcams, macOS-exposed iPhone/Continuity Camera inputs, main-display screen or r
 - **Switch cameras as the music plays:** after recording, play the footage with CamOrder focused and press **1–9** for the first nine lanes. Each switch cuts all regions crossing that time and brings the chosen camera forward. Choose **Live cuts: Free / Snap** for exact or beat-snapped switching; Undo reverses the whole switch.
 - Drag the numbered lane grip to reorder cameras. **View → Controls at bottom** puts Main Stage above the timeline and all editing/project controls below.
 - **Choose the foreground:** select regions and use **Output Layer**, or keys **1–9** while paused. Layer 1 is in front, followed by 2 and 3; numbered borders and badges identify the output order during Main Stage playback and export. Ordinary selection never changes it.
-- While paused, **Edit selection** temporarily brings an obscured region forward for framing and automation. Playback and export retain the assigned output order. Click empty timeline space or the outer black canvas margin to deselect.
+- While paused, **View selected clip** temporarily brings an obscured region forward for framing and automation. Playback and export retain the assigned output order. Click empty timeline space or the outer black canvas margin to deselect.
 - Export shows its percentage and a finished notice, with a folder button to reveal the movie in Finder. Progress survives closing and reopening the editor.
 - A built-in **Sync → Calculator** compares Logic’s clock with the clock visible in your video, calculates the correction in milliseconds and applies it to the project or one lane.
 - Non-destructive lane and project sync adjustments, starting at **0 ms**, applied separately to each lane in playback and export. The movie’s edited start stays fixed, so corrections remain effective when you reimport at the same beat.
@@ -78,6 +82,6 @@ auval -v aufx CmSt Sntm
 
 To build the DMG and native installer from the verified component, run `python3 Scripts/package-installer.py`. See [installer packaging and verification](docs/INSTALLER.md).
 
-Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.8.0.md) for the tests and their limits.
+Run these sequentially. The default build targets the current Mac; `CAMORDER_ARCH=arm64` or `x86_64` selects one architecture. See the [verification record](docs/VERIFICATION-0.10.1.md) for the tests and their limits.
 
 CamOrder is [MIT licensed](LICENSE). The vendored AudioUnitSDK has its [own license](CamOrderStudio/Vendor/AudioUnitSDK/LICENSE.txt).

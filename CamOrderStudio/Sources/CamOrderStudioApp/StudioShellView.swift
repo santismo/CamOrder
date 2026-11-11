@@ -145,7 +145,7 @@ struct StudioShellView: View {
                 }.padding(.horizontal, 8)
                 if controlsAtBottom { controls(height: geometry.size.height) }
                 HStack {
-                    Text("CamOrder · AU 0.10.0").font(.system(size: 9)).foregroundStyle(.tertiary)
+                    Text("CamOrder · AU 0.10.1").font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let resizeEditor {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -771,6 +771,7 @@ private struct PlaybackPreviewPane: View {
     @StateObject private var previews = PlaybackPreviewController()
     @State private var exporting = false
     @State private var previewSources: [URL] = []
+    @State private var previewVisible = false
 
     private var previewRequest: PlaybackPreviewController.Request {
         .init(sources: previewSources, quality: preferences.quality)
@@ -806,13 +807,13 @@ private struct PlaybackPreviewPane: View {
                 Picker("Preview", selection: $preferences.quality) {
                     ForEach(PreviewQuality.allCases) { Text($0.title).tag($0) }
                 }.frame(width: 160)
-                    .help("Display quality only. Balanced and Light reduce live previews immediately. Prepare playback to create smaller copies of recorded video. Recording and export stay at original quality.")
+                    .help("Display quality only. Balanced and Light reduce live previews immediately. Playback copies prepare automatically when stopped and disarmed. Recording and export stay at original quality.")
                 if preferences.quality != .full {
-                    Button(previews.isPreparing ? "Stop preparing" : "Prepare playback") {
+                    Button(previews.isPreparing ? "Pause previews" : "Prepare now") {
                         if previews.isPreparing { previews.stop() } else { previews.prepare() }
-                    }.disabled(previewBusy || previewRequest.sources.isEmpty)
-                        .help("Prepare smaller playback copies while stopped and disarmed. Starting playback, arming, exporting or closing this view stops preparation. Completed copies are kept.")
-                    Text(previews.message.isEmpty ? "Live reduced · playback \(previews.urls.count)/\(previewRequest.sources.count) ready" : previews.message)
+                    }.disabled(previewBusy || previews.isCheckingCache || previewRequest.sources.isEmpty)
+                        .help("New clips prepare automatically after one idle second while stopped and disarmed. Prepare now starts immediately or retries failed files. Pause previews pauses until the next transport/arm cycle or reopening this view. Starting playback, arming or exporting suspends work; ready copies are kept.")
+                    Text(previews.message)
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         .help(previews.message)
                 }
@@ -865,16 +866,20 @@ private struct PlaybackPreviewPane: View {
             }
         }
         .onChange(of: store.selectedClipId) { _ in previewSelection = true }
-        .onAppear { refreshPreviewSources() }
+        .onAppear { previewVisible = true; refreshPreviewSources(); updatePreviews() }
         .onChange(of: store.project.media) { _ in refreshPreviewSources() }
         .onChange(of: store.document?.folderURL) { _ in refreshPreviewSources() }
-        .task(id: previewRequest) { await previews.configure(previewRequest) }
-        .onChange(of: previewBusy) { busy in if busy { previews.stop() } }
+        .onChange(of: previewRequest) { _ in updatePreviews() }
+        .onChange(of: previewBusy) { _ in updatePreviews() }
         .onReceive(store.exportController.$isRendering) { value in
             exporting = value
-            if value { previews.stop() }
+            updatePreviews()
         }
-        .onDisappear { previews.stop() }
+        .onDisappear { previewVisible = false; updatePreviews() }
+    }
+
+    private func updatePreviews() {
+        previews.update(previewRequest, isIdle: previewVisible && !previewBusy)
     }
 
     private func refreshPreviewSources() {

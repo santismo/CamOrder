@@ -22,7 +22,8 @@ final class PreviewPreferencesTests: XCTestCase {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let controller = PlaybackPreviewController(cache: PreviewProxyCache(folder: folder))
-        await controller.configure(.init(sources: [source], quality: .light))
+        controller.update(.init(sources: [source], quality: .light), isIdle: true)
+        while controller.isCheckingCache { try await Task.sleep(nanoseconds: 1_000_000) }
         controller.prepare()
         XCTAssertTrue(controller.isPreparing)
         controller.stop()
@@ -33,7 +34,7 @@ final class PreviewPreferencesTests: XCTestCase {
         let deadline = Date().addingTimeInterval(10)
         while controller.isPreparing && Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertNotNil(controller.urls[source])
-        await controller.configure(.init(sources: [source], quality: .full))
+        controller.update(.init(sources: [source], quality: .full), isIdle: true)
         XCTAssertTrue(controller.urls.isEmpty)
         controller.prepare()
         XCTAssertFalse(controller.isPreparing)
